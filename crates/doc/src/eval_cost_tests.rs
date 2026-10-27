@@ -573,6 +573,19 @@ fn shared_evaluation_requires_its_actual_model_and_unmodified_geometry_inputs() 
     assert!(model.evaluate_shared(&doc), "refingerprinted results must not keep the old shared-input proof");
     assert_eq!(model.result(feature).unwrap().name, name);
     assert!(model.is_current(&doc));
+
+    // A saved-profile catalog edit must invalidate the retained document proof.
+    let spec: crate::frame::ProfileSpec = serde_json::from_value(serde_json::json!({"kind": "bar", "width": 4, "height": 2})).unwrap();
+    let region = spec.resolve(|_, e| Ok(e.as_str().parse::<f64>().unwrap())).unwrap().region().unwrap();
+    let profile = crate::frame::SavedProfile::new("Stock".into(), "test".into(), region).unwrap();
+    Arc::make_mut(&mut doc).frame_profiles.insert("Stock".into(), profile);
+    assert!(model.evaluate_shared(&doc), "adding a saved profile must invalidate");
+    assert!(model.is_current(&doc));
+    assert!(!model.evaluate_shared(&doc), "unchanged profiles retain the proof");
+    Arc::make_mut(&mut doc).frame_profiles.clear();
+    assert!(model.evaluate_shared(&doc), "removing a saved profile must invalidate");
+    assert!(model.is_current(&doc));
+    assert!((model.state().bodies[0].measure().unwrap().volume - 180.).abs() < 1e-8);
 }
 
 #[test]

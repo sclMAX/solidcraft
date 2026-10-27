@@ -122,6 +122,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         links,
         configs,
         favorites,
+        frame_profiles,
         canvases,
         param_comments,
         text_params,
@@ -156,6 +157,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *links == b.links
         && *configs == b.configs
         && *favorites == b.favorites
+        && *frame_profiles == b.frame_profiles
         && *canvases == b.canvases
         && *param_comments == b.param_comments
         && *text_params == b.text_params
