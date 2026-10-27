@@ -15,7 +15,7 @@ T1 | S3-S4 | delegated initial writer, inline bounded CI correction | in_progres
 T2 | S4 | delegated writer, independent connected-section model and validator | done | commit: pending work-unit CI; writer RED 101 against stubs, GREEN 0 (3 tests), fmt 0; parent job-8 exit 0, 3 passed.
 T3 | S1-S4 | inline integration and bounded independent-verifier correction | done | commit: none; job-25 RED exit 101 confirmed defect; Document::from_json validation implemented; job-26 GREEN exit 0 confirmed all 3 persisted-load tests passed.
 T4 | S1-S4 | inline integration: shared library UI and browser import/persistence | done | commit: pending CI. RED jobs 13/14 observed. Compile failures and clipped export were corrected. Job-19 exit 0 verifies the complete shared-picker workflow and all 3 expanded schema tests; job-20 exit 0 builds the current browser bundle. Actual browser persistence/visual evidence remains T5.
-T5 | S1-S4 | independent verification (Risk: item 1), browser evidence, CI and native review | in_progress | commit: none; browser job-23 passed and independent differential matched; job-27 running full cargo xtask ci.
+T5 | S1-S4 | independent verification (Risk: item 1), browser evidence, CI and native review | done | commit: f6595831; push: origin/feat/profile-library-dxf; browser runtime passed in job-23, differential matched baseline, clippy and persisted loading corrected and verified.
 
 ## Log
 L1. Original request verbatim: "Analicemos como inplementear la libreria, investiguemos pros, contras, oportunidades y mejoras."
@@ -43,3 +43,4 @@ L22. User reminder requested native inspect/start for the unreviewed target. No 
 L23. Job-25 RED exit 101 confirmed that hostile persisted designs with invalid revisions, mismatched keys or >128 entries were previously accepted. Implemented validation in Document::from_json and MAX_SAVED_PROFILES in frame.rs; also corrected collapsible_if in profile_dxf.rs. Job-26 tests the 3 regression tests for GREEN. Lineage review-8753cea5767b7b0f remains active.
 L24. Job-26 exited 0 after 6m49s: all 3 persisted-profile tests passed GREEN. Job-27 launched to run full cargo xtask ci (fmt, assets, licences, layers, ui-containers, clippy -D warnings, tests, wasm). Todo list updated.
 L25. Job-27 exited 1 on clippy field_reassign_with_default in frame_library_tests.rs. Initializer corrected; launching job-28 to complete cargo xtask ci.
+L26. Configured git identity with sclMAX and pushed commit f6595831 to origin/feat/profile-library-dxf. All 5 tasks done. Working tree clean.
