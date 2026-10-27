@@ -372,6 +372,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Plastic(crate::dialogs_plastic::Pl),
             /// Frame members (`dialogs_frame`).
             Frame(crate::dialogs_frame::Member),
+            /// Reusable structural profiles, shared by native and browser hosts.
+            ProfileLibrary(crate::dialogs_profile_library::Library),
             /// Appearance (`dialogs_appearance`).
             Appearance(crate::dialogs_appearance::Ap),
             /// Contact sets, motion studies, exploded views, configurations (`dialogs_motion`).
@@ -1011,6 +1013,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_view_dxf::start(app, id))
                     .or_else(|| crate::dialogs_plastic::start(app, id))
                     .or_else(|| crate::dialogs_frame::start(app, id))
+                    .or_else(|| (id == "frame.profile.library").then(|| (Kind::ProfileLibrary(Default::default()), vec![])))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
                     .or_else(|| crate::dialogs_motion::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
@@ -2111,6 +2114,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
+        Kind::ProfileLibrary(_) => crate::i18n::tr("cmd.frame.profile.library"),
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
@@ -2771,7 +2775,7 @@ pub(crate) fn docks(d: &Dialog) -> bool {
 /// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
 pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
-    if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
+    if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. } | Kind::ProfileLibrary(_)) {
         t.form_card_width + t.form_label_width + t.space_6
     } else if matches!(&d.kind, Kind::Motion(k) if k.wide()) {
         t.form_card_width * 3.0
@@ -2784,7 +2788,7 @@ pub(crate) fn card_width(d: &Dialog) -> f32 {
 /// says what it does.
 pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
     match kind {
-        Kind::Measure { .. } => ("", "Close"),
+        Kind::Measure { .. } | Kind::ProfileLibrary(_) => ("", "Close"),
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
         Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
@@ -2890,7 +2894,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let heading = if d.editing.is_some() { crate::i18n::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     // OK is offered once the inputs make a feature.
-    let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
+    let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ProfileLibrary(_));
     let valid = match &d.kind {
         Kind::Sketch => false,
         // Nothing picked is an answer too: OK empties the chat's tray.
@@ -2953,6 +2957,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 d.kind,
                 Kind::Material { .. }
                     | Kind::Appearance(_)
+                    | Kind::ProfileLibrary(_)
                     | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })
                     | Kind::Sheet(crate::dialogs_sheet::Sm::Rules { .. })
                     | Kind::Plastic(crate::dialogs_plastic::Pl::Rules { .. })
@@ -4562,6 +4567,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
+        Kind::ProfileLibrary(_) => return Ok(Vec::new()),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),

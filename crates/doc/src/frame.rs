@@ -27,6 +27,8 @@ mod tests;
 
 /// Most members one frame member feature makes.
 pub const MAX_MEMBERS: usize = 1000;
+/// Most reusable structural profiles stored in a design.
+pub const MAX_SAVED_PROFILES: usize = 128;
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
 /// The smallest profile dimension (mm): walls and sides thinner than this are refused, and so
@@ -267,6 +269,8 @@ pub use crate::eval::frame_member::{member_line_ids, member_names};
 pub enum MemberProfile {
     /// A built-in profile, from its dimensions.
     Library { profile: ProfileSpec },
+    /// A validated self-contained section, pinned to the selected library revision.
+    Saved { profile: SavedProfile },
     /// The profiles of a sketch, in the sketch's own x and y, its origin the profile's origin.
     /// Every profile (the default) means the material as nested loops alternate: an outline is
     /// material, a loop inside it a hole, a loop inside that material again, so a tube drawn as
@@ -278,6 +282,43 @@ pub enum MemberProfile {
         profiles: crate::ProfileSel,
     },
 }
+
+/// A named, immutable section revision. Geometry uses millimetres around its chosen origin.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedProfile {
+    pub name: String,
+    pub source: String,
+    pub revision: String,
+    pub region: Region2,
+}
+impl SavedProfile {
+    pub fn new(name: String, source: String, region: Region2) -> Result<Self> {
+        let mut profile = Self { name, source, revision: String::new(), region };
+        profile.revision = profile.content_revision()?;
+        Ok(profile)
+    }
+    fn content_revision(&self) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        if self.name.trim() != self.name || self.name.is_empty() || self.name.len() > 128 || self.name.chars().any(char::is_control) {
+            return Err(invalid("profile name must be 1…128 bytes without surrounding whitespace or control characters"));
+        }
+        if self.source.is_empty() || self.source.len() > 256 || self.source.chars().any(char::is_control) {
+            return Err(invalid("invalid profile source"));
+        }
+        crate::frame_section::validate_section(&self.region)?;
+        let bytes = serde_json::to_vec(&(&self.name, &self.source, &self.region)).map_err(|e| invalid(e.to_string()))?;
+        Ok(format!("{:x}", Sha256::digest(bytes)))
+    }
+    pub fn validate(&self) -> Result<()> {
+        if self.revision != self.content_revision()? {
+            return Err(invalid("profile content revision does not match its definition"));
+        }
+        Ok(())
+    }
+}
+// Saved coordinates contain no document references or parameter expressions.
+impl crate::walk::Walk for SavedProfile {}
 
 impl Anchor {
     pub fn is_origin(&self) -> bool {

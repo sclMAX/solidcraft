@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("frame.member", "Frame Member", member).at("WELDMENTS", "CREATE").icon("frame_member").enabled(not_in_sketch).params(concat!(
         "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
         profile_doc!(),
-        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
+        " | profile_entry: saved profile name (copies its current revision) | profile_snapshot: self-contained saved profile revision (used by Edit Feature) | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", list).icon("library")
         .noundo()
@@ -207,22 +207,44 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
                 .to_string(),
         ),
     };
-    let (profile, default_name) = match (p.get("profile"), p.get("profile_sketch")) {
-        (Some(_), None) => {
-            let spec = profile_spec(cmd, p)?;
-            let pr = resolve(s, cmd, &spec)?;
-            pr.region().map_err(|e| bad(cmd, e.to_string()))?;
-            (MemberProfile::Library { profile: spec }, pr.description())
-        }
-        (None, Some(v)) => {
-            let id = sketch_id(s, Some(v), cmd, "profile_sketch")?;
-            if id == path_sketch {
-                return Err(bad(cmd, "the profile sketch must not be the frame sketch"));
+    let saved = match (p.get("profile_entry"), p.get("profile_snapshot")) {
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err(bad(cmd, "give profile_entry or profile_snapshot, not both")),
+        (entry, snapshot) => {
+            if p.get("profile").is_some() || p.get("profile_sketch").is_some() {
+                return Err(bad(cmd, "give one profile source only"));
             }
-            let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| "Member".into());
-            (MemberProfile::Sketch { sketch: SketchId(id), profiles: super::feature_profiles(p, cmd)? }, name)
+            let saved: frame::SavedProfile = if let Some(entry) = entry {
+                let name = entry.as_str().ok_or_else(|| bad(cmd, "profile_entry must be a saved profile name"))?;
+                s.doc.frame_profiles.get(name).cloned().ok_or_else(|| bad(cmd, "saved profile was not found"))?
+            } else {
+                serde_json::from_value(snapshot.cloned().ok_or_else(|| bad(cmd, "missing profile snapshot"))?).map_err(|e| bad(cmd, e.to_string()))?
+            };
+            saved.validate().map_err(|e| bad(cmd, e.to_string()))?;
+            let name = saved.name.clone();
+            Some((MemberProfile::Saved { profile: saved }, name))
         }
-        _ => return Err(bad(cmd, "give `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them")),
+    };
+    let (profile, default_name) = if let Some(saved) = saved {
+        saved
+    } else {
+        match (p.get("profile"), p.get("profile_sketch")) {
+            (Some(_), None) => {
+                let spec = profile_spec(cmd, p)?;
+                let pr = resolve(s, cmd, &spec)?;
+                pr.region().map_err(|e| bad(cmd, e.to_string()))?;
+                (MemberProfile::Library { profile: spec }, pr.description())
+            }
+            (None, Some(v)) => {
+                let id = sketch_id(s, Some(v), cmd, "profile_sketch")?;
+                if id == path_sketch {
+                    return Err(bad(cmd, "the profile sketch must not be the frame sketch"));
+                }
+                let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| "Member".into());
+                (MemberProfile::Sketch { sketch: SketchId(id), profiles: super::feature_profiles(p, cmd)? }, name)
+            }
+            _ => return Err(bad(cmd, "give `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them")),
+        }
     };
     let anchor: Anchor = match p.get("anchor") {
         None | Some(Value::Null) => Anchor::default(),

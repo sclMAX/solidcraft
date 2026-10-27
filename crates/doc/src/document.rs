@@ -2707,6 +2707,9 @@ pub struct Document {
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
+    /// Reusable structural sections. Members keep independent immutable copies.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub frame_profiles: std::collections::BTreeMap<String, crate::frame::SavedProfile>,
     /// Appearance colour per body (by body name, sRGB); it overrides the material's look.
     #[serde(default, skip_serializing_if = "crate::appearance::Appearances::is_empty")]
     pub appearances: crate::appearance::Appearances,
@@ -2947,6 +2950,7 @@ impl Document {
             body_offsets: Default::default(),
             materials: Default::default(),
             user_materials: Vec::new(),
+            frame_profiles: std::collections::BTreeMap::new(),
             appearances: Default::default(),
             favorites: Default::default(),
             canvases: Vec::new(),
@@ -3323,6 +3327,20 @@ impl Document {
         let d = crate::format::read(s)?;
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
+        }
+        if d.frame_profiles.len() > crate::frame::MAX_SAVED_PROFILES {
+            return Err(DocError::Invalid("profile library exceeds 128 entries".into()));
+        }
+        for (key, profile) in &d.frame_profiles {
+            if key != &profile.name {
+                return Err(DocError::Invalid("profile library key must match its entry name".into()));
+            }
+            profile.validate()?;
+        }
+        for f in &d.features {
+            if let FeatureKind::FrameMember { profile: crate::frame::MemberProfile::Saved { profile }, .. } = &f.kind {
+                profile.validate()?;
+            }
         }
         Ok(d)
     }

@@ -56,6 +56,7 @@ mod tests;
 // The contracts, by command file.
 pub mod edit;
 pub mod features;
+pub mod frame_library;
 pub mod inspect;
 pub mod sketch_constraints;
 pub mod view_navigation;

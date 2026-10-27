@@ -41,6 +41,8 @@ pub struct Member {
     /// A profile sketch whose whole drawn section is the member's (nested loops alternating), as
     /// a feature made that way keeps it while no section is picked.
     pub whole: Option<u64>,
+    /// A saved member's immutable section, retained when its catalog changes.
+    pub saved: Option<frame::SavedProfile>,
     pub anchor: usize,
     pub angle: String,
     pub mirror: bool,
@@ -59,7 +61,7 @@ impl Member {
             .collect();
         // A rectangular tube is the most common member.
         let kind = frame::profile_kinds().iter().position(|k| k.kind == "rect_tube").unwrap_or(0);
-        Member { all: false, kind, dims, whole: None, anchor: 0, angle: String::new(), mirror: false, name: String::new() }
+        Member { all: false, kind, dims, whole: None, saved: None, anchor: 0, angle: String::new(), mirror: false, name: String::new() }
     }
 }
 
@@ -85,7 +87,23 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelInpu
         if !on {
             m.whole = None;
         }
+    } else if !picked && m.saved.is_some() {
+        let mut on = true;
+        if let Some(saved) = &m.saved {
+            form_row(ui, "Profile", |ui| crate::ui_kit::checkbox(ui, &saved.name, &mut on));
+        }
+        if !on {
+            m.saved = None;
+        }
     } else if !picked {
+        let names: Vec<String> =
+            std::iter::once(app.tr("profile_library.built_in").to_owned()).chain(app.session.doc.frame_profiles.keys().cloned()).collect();
+        let labels: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut selected = 0;
+        choice_row(ui, app.tr("profile_library.saved_section"), "frame_saved_profile", &mut selected, &labels);
+        if let Some(name) = names.get(selected).filter(|_| selected > 0) {
+            m.saved = app.session.doc.frame_profiles.get(name).cloned();
+        }
         let kinds = frame::profile_kinds();
         let labels: Vec<&str> = kinds.iter().map(|k| k.label).collect();
         choice_row(ui, "Profile", "frame_profile", &mut m.kind, &labels);
@@ -143,6 +161,8 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
         if !section.is_empty() {
             p["profiles"] = json!(section.iter().map(|x| x.1).collect::<Vec<_>>());
         }
+    } else if let Some(saved) = &m.saved {
+        p["profile_snapshot"] = serde_json::to_value(saved).map_err(|e| e.to_string())?;
     } else {
         let kinds = frame::profile_kinds();
         let (k, values) = kinds.get(m.kind).zip(m.dims.get(m.kind)).ok_or("choose a profile")?;
@@ -183,6 +203,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         i.items = ids.into_iter().map(|id| Sel::ExternalSketchCurve { sketch: path_sketch.0, id }).collect();
     }
     match profile {
+        MemberProfile::Saved { profile } => m.saved = Some(profile.clone()),
         MemberProfile::Library { profile } => {
             let kinds = frame::profile_kinds();
             if let Some((index, k)) = kinds.iter().enumerate().find(|(_, k)| k.kind == profile.kind)

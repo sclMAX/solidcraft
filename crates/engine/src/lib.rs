@@ -1814,6 +1814,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         param_comments,
         materials,
         user_materials,
+        frame_profiles,
         appearances,
         body_components,
         body_offsets,
@@ -1848,6 +1849,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *param_comments == b.param_comments
         && *materials == b.materials
         && *user_materials == b.user_materials
+        && *frame_profiles == b.frame_profiles
         && *appearances == b.appearances
         && *body_components == b.body_components
         && *body_offsets == b.body_offsets

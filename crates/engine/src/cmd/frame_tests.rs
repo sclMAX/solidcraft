@@ -638,3 +638,231 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
 }
+
+struct ProfileDesignScratch(std::path::PathBuf);
+impl Drop for ProfileDesignScratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn persisted_profile_fixture() -> (ProfileDesignScratch, Value) {
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = ProfileDesignScratch(std::env::temp_dir().join(format!("solidcraft-profile-load-{}-{nonce}", std::process::id())));
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let mut source = Session::default();
+    run(&mut source, "frame.profile.save", json!({"name":"Bar","profile":{"kind":"bar","width":10,"height":20}}));
+    let path = dir.0.join("source.json");
+    run(&mut source, "file.save_as", json!({"path":path,"format":"json","cache":false}));
+    let design = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    (dir, design)
+}
+
+fn assert_persisted_profile_refused(dir: &ProfileDesignScratch, design: Value, expected: &str) {
+    let path = dir.0.join("invalid.solidcraft");
+    let bytes = design.to_string().into_bytes();
+    std::fs::write(&path, &bytes).unwrap();
+    let mut target = Session::default();
+    run(&mut target, "frame.profile.save", json!({"name":"Keep","profile":{"kind":"bar","width":3,"height":4}}));
+    let before = run(&mut target, "document.inspect", json!({}));
+    let revision = run(&mut target, "document.revision", json!({}));
+    let library = run(&mut target, "frame.profile.library", json!({}));
+    let result = target.execute("doc.open", &json!({"path":path}));
+    assert!(result.is_err(), "invalid persisted library was accepted: {result:?}");
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains(expected), "expected error containing {expected:?}, got {err:?}");
+    assert_eq!(run(&mut target, "document.inspect", json!({})), before);
+    assert_eq!(run(&mut target, "document.revision", json!({})), revision);
+    assert_eq!(run(&mut target, "frame.profile.library", json!({})), library);
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    run(&mut target, "edit.undo", json!({}));
+    assert!(run(&mut target, "frame.profile.library", json!({}))["entries"].as_array().unwrap().is_empty());
+    run(&mut target, "edit.redo", json!({}));
+    assert_eq!(run(&mut target, "frame.profile.library", json!({})), library);
+}
+
+#[test]
+fn persisted_profile_revision_is_validated_before_open() {
+    let (dir, mut design) = persisted_profile_fixture();
+    design["frame_profiles"]["Bar"]["revision"] = json!("bad");
+    assert_persisted_profile_refused(&dir, design, "profile content revision does not match its definition");
+}
+
+#[test]
+fn persisted_profile_key_must_match_its_name() {
+    let (dir, mut design) = persisted_profile_fixture();
+    let entry = design["frame_profiles"]["Bar"].clone();
+    design["frame_profiles"] = json!({"Wrong key":entry});
+    assert_persisted_profile_refused(&dir, design, "profile library key must match its entry name");
+}
+
+#[test]
+fn persisted_profile_library_enforces_its_count_boundary() {
+    let (dir, mut design) = persisted_profile_fixture();
+    design["frame_profiles"] = json!({});
+    for i in 0..128 {
+        let mut source = Session::default();
+        let name = format!("Profile {i}");
+        let entry = run(&mut source, "frame.profile.save", json!({"name":name,"profile":{"kind":"bar","width":3,"height":4}}))["entry"].clone();
+        design["frame_profiles"][name] = entry;
+    }
+    let valid = dir.0.join("valid.solidcraft");
+    std::fs::write(&valid, design.to_string()).unwrap();
+    let mut target = Session::default();
+    run(&mut target, "doc.open", json!({"path":valid}));
+    assert_eq!(run(&mut target, "frame.profile.library", json!({}))["entries"].as_array().unwrap().len(), 128);
+    let mut extra = Session::default();
+    design["frame_profiles"]["Extra"] =
+        run(&mut extra, "frame.profile.save", json!({"name":"Extra","profile":{"kind":"bar","width":3,"height":4}}))["entry"].clone();
+    assert_persisted_profile_refused(&dir, design, "profile library exceeds 128 entries");
+}
+
+fn reusable_dxf(radii: &[f64]) -> String {
+    let entities: String = radii.iter().map(|r| format!("0\nCIRCLE\n10\n0\n20\n0\n40\n{r}\n")).collect();
+    format!("0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n")
+}
+
+#[test]
+fn reusable_profiles_preview_is_read_only_and_import_checks_its_revision() {
+    let mut s = Session::default();
+    let before = run(&mut s, "frame.profile.library", json!({}));
+    let revision = run(&mut s, "document.revision", json!({}));
+    let draft = json!({"name":"Tube", "text":reusable_dxf(&[10.0,8.0]), "units":"mm"});
+    let preview = run(&mut s, "frame.profile.inspect_dxf", draft.clone());
+    assert!((f(&preview["section"]["area"]) - 36.0 * PI).abs() < 1e-9);
+    assert_eq!(run(&mut s, "frame.profile.library", json!({})), before);
+    assert_eq!(run(&mut s, "document.revision", json!({})), revision);
+    let mut changed = draft.clone();
+    changed["text"] = json!(reusable_dxf(&[11.0, 8.0]));
+    changed["expected_revision"] = preview["entry"]["revision"].clone();
+    let err = s.execute("frame.profile.import_dxf", &changed).unwrap_err();
+    assert_eq!(err.to_string(), "invalid parameters for `frame.profile.import_dxf`: profile changed after preview; inspect it again");
+    assert_eq!(run(&mut s, "frame.profile.library", json!({})), before);
+    assert_eq!(run(&mut s, "document.revision", json!({})), revision);
+    let mut confirmed = draft;
+    confirmed["expected_revision"] = preview["entry"]["revision"].clone();
+    assert_eq!(run(&mut s, "frame.profile.import_dxf", confirmed), preview);
+}
+
+#[test]
+fn reusable_profiles_store_continuous_outlines_with_several_holes() {
+    let body = "0\nLWPOLYLINE\n90\n4\n70\n1\n10\n0\n20\n0\n10\n10\n20\n0\n10\n10\n20\n10\n10\n0\n20\n10\n0\nCIRCLE\n10\n3\n20\n5\n40\n1\n0\nCIRCLE\n10\n7\n20\n5\n40\n1\n";
+    let text = format!("0\nSECTION\n2\nENTITIES\n{body}0\nENDSEC\n0\nEOF\n");
+    let mut s = Session::default();
+    let out = run(&mut s, "frame.profile.import_dxf", json!({"name":"Plate section", "text":text,"units":"mm", "origin":[5,5]}));
+    assert_eq!(out["entry"]["region"]["holes"].as_array().unwrap().len(), 2);
+    assert!((f(&out["section"]["area"]) - (100.0 - 2.0 * PI)).abs() < 1e-9);
+    assert!(f(&out["section"]["centroid"][0]).abs() < 1e-9);
+    assert!(f(&out["section"]["centroid"][1]).abs() < 1e-9);
+    let before = run(&mut s, "frame.profile.library", json!({}));
+    let revision = run(&mut s, "document.revision", json!({}));
+    let open = text.replace("70\n1", "70\n0");
+    let error = s.execute("frame.profile.import_dxf", &json!({"name":"Open","text":open,"units":"mm"})).unwrap_err();
+    assert_eq!(error.to_string(), "invalid parameters for `frame.profile.import_dxf`: frame section: open loop");
+    assert_eq!(run(&mut s, "frame.profile.library", json!({})), before);
+    assert_eq!(run(&mut s, "document.revision", json!({})), revision);
+}
+
+#[test]
+fn reusable_profiles_survive_save_and_reopen_without_catalog_file() {
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = Scratch(std::env::temp_dir().join(format!("solidcraft-profiles-{}-{nonce}", std::process::id())));
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "frame.profile.save", json!({"name":"Bar", "profile":{"kind":"bar","width":10,"height":20}}));
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch":"Frame","profile_entry":"Bar"}));
+    let before = run(&mut s, "frame.profile.library", json!({}));
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].clone();
+    let catalog = dir.0.join("profiles.json");
+    run(&mut s, "frame.profile.export", json!({"path":catalog}));
+    let bytes = std::fs::read(&catalog).unwrap();
+    assert!(s.execute("frame.profile.export", &json!({"path":catalog})).is_err());
+    assert_eq!(std::fs::read(&catalog).unwrap(), bytes, "failed exports preserve the destination");
+    let design = dir.0.join("frame.solidcraft");
+    run(&mut s, "file.save_as", json!({"path":design,"cache":false}));
+    std::fs::remove_file(catalog).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":design}));
+    assert_eq!(run(&mut reopened, "frame.profile.library", json!({})), before);
+    assert_eq!(run(&mut reopened, "inspect.measure", json!({}))["total"]["volume_mm3"], volume);
+}
+
+#[test]
+fn reusable_profiles_catalog_tampering_is_rejected_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "frame.profile.save", json!({"name":"Bar", "profile":{"kind":"bar","width":10,"height":20}}));
+    let exported = run(&mut s, "frame.profile.export", json!({}));
+    let mut catalog: Value = serde_json::from_str(exported["text"].as_str().unwrap()).unwrap();
+    catalog["entries"][0]["revision"] = json!("0".repeat(64));
+    let before = run(&mut s, "frame.profile.library", json!({}));
+    let revision = run(&mut s, "document.revision", json!({}));
+    let err = s.execute("frame.profile.import", &json!({"text":catalog.to_string(),"replace":true})).unwrap_err();
+    assert_eq!(err.to_string(), "invalid parameters for `frame.profile.import`: profile content revision does not match its definition");
+    assert_eq!(run(&mut s, "frame.profile.library", json!({})), before);
+    assert_eq!(run(&mut s, "document.revision", json!({})), revision);
+}
+
+#[test]
+fn reusable_profiles_import_tube_and_reject_islands_atomically() {
+    let mut s = Session::default();
+    let imported = run(&mut s, "frame.profile.import_dxf", json!({"name":"Tube", "text":reusable_dxf(&[10.0, 8.0]), "units":"mm"}));
+    assert_eq!(imported["entry"]["name"], "Tube");
+    assert!((f(&imported["section"]["area"]) - 36.0 * PI).abs() < 1e-9);
+    assert_eq!(imported["entry"]["region"]["holes"].as_array().unwrap().len(), 1);
+    let before = run(&mut s, "frame.profile.library", json!({}));
+    let revision = run(&mut s, "document.revision", json!({}));
+    let error = s.execute("frame.profile.import_dxf", &json!({"name":"Islands", "text":reusable_dxf(&[10.0, 8.0, 2.0]), "units":"mm"})).unwrap_err();
+    let crate::EngineError::BadParams { cmd, msg } = error else { panic!("{error}") };
+    assert_eq!(cmd, "frame.profile.import_dxf");
+    assert_eq!(msg, "frame section: nested holes or material islands");
+    assert_eq!(run(&mut s, "frame.profile.library", json!({})), before);
+    assert_eq!(run(&mut s, "document.revision", json!({})), revision);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, "frame.profile.library", json!({}))["entries"].as_array().unwrap().is_empty());
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(run(&mut s, "frame.profile.library", json!({})), before);
+}
+
+#[test]
+fn reusable_profiles_roundtrip_catalog_and_member_snapshot() {
+    let mut s = Session::default();
+    run(&mut s, "frame.profile.save", json!({"name":"Bar", "profile":{"kind":"bar", "width":10, "height":20}}));
+    let exported = run(&mut s, "frame.profile.export", json!({}));
+    let mut other = Session::default();
+    run(&mut other, "frame.profile.import", json!({"text":exported["text"]}));
+    assert_eq!(run(&mut other, "frame.profile.library", json!({})), run(&mut s, "frame.profile.library", json!({})));
+    rectangle_frame(&mut other);
+    run(&mut other, "frame.member", json!({"sketch":"Frame", "profile_entry":"Bar"}));
+    let measured = run(&mut other, "inspect.measure", json!({}));
+    assert!(rel(f(&measured["total"]["volume_mm3"]), 200.0 * 2000.0) < 1e-6, "{measured}");
+    run(&mut other, "frame.profile.save", json!({"name":"Bar", "replace":true, "profile":{"kind":"bar", "width":30, "height":20}}));
+    assert_eq!(run(&mut other, "inspect.measure", json!({})), measured, "stored members use their snapshot, not a live catalog lookup");
+}
+
+#[test]
+fn reusable_profiles_reject_blocks_and_duplicate_names_without_mutation() {
+    let mut s = Session::default();
+    run(&mut s, "frame.profile.import_dxf", json!({"name":"Disk", "text":reusable_dxf(&[2.0]), "units":"mm"}));
+    let before = run(&mut s, "frame.profile.library", json!({}));
+    let revision = run(&mut s, "document.revision", json!({}));
+    let with_block = reusable_dxf(&[2.0]).replace("0\nCIRCLE", "0\nINSERT\n2\nPart\n0\nCIRCLE");
+    for (params, expected) in [
+        (json!({"name":"Block", "text":with_block, "units":"mm"}), "profile DXF does not support entity INSERT"),
+        (json!({"name":"Disk", "text":reusable_dxf(&[3.0]), "units":"mm"}), "profile name already exists; set replace to true"),
+        (json!({"name":"Unknown units", "text":reusable_dxf(&[3.0])}), "profile DXF requires known units or an explicit override"),
+    ] {
+        let error = s.execute("frame.profile.import_dxf", &params).unwrap_err();
+        let crate::EngineError::BadParams { cmd, msg } = error else { panic!("{error}") };
+        assert_eq!(cmd, "frame.profile.import_dxf");
+        assert_eq!(msg, expected);
+        assert_eq!(run(&mut s, "frame.profile.library", json!({})), before);
+        assert_eq!(run(&mut s, "document.revision", json!({})), revision);
+    }
+}

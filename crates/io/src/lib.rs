@@ -22,7 +22,10 @@ mod legacy_dir;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
+pub mod profile_catalog;
+mod profile_dxf;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+pub use profile_dxf::read_profile_dxf;
 pub mod safe_write;
 mod sketch2d;
 mod svg;

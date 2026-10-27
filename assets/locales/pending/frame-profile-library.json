@@ -1,0 +1,33 @@
+{
+  "en": {
+    "cmd.frame.profile.export": "Export Profile Library",
+    "cmd.frame.profile.import": "Import Profile Library",
+    "cmd.frame.profile.import_dxf": "Import Profile DXF",
+    "cmd.frame.profile.inspect_dxf": "Preview Profile DXF",
+    "cmd.frame.profile.library": "Saved Profiles",
+    "cmd.frame.profile.save": "Save Profile",
+    "profile_library.built_in": "Built-in profile",
+    "profile_library.choose_dxf": "Choose DXF…",
+    "profile_library.empty": "No saved profiles match.",
+    "profile_library.export_catalog": "Export library…",
+    "profile_library.exported": "Library exported. Keep the exported file as a backup.",
+    "profile_library.file": "DXF file",
+    "profile_library.import_catalog": "Import library…",
+    "profile_library.imported": "Profile library updated. Save the design or export a backup.",
+    "profile_library.invalid_origin": "Origin must contain two finite numbers in millimetres.",
+    "profile_library.invalid_preview": "The profile preview response is invalid.",
+    "profile_library.name": "Profile name",
+    "profile_library.origin_x": "Origin X (mm)",
+    "profile_library.origin_y": "Origin Y (mm)",
+    "profile_library.overwrite": "Replace existing export file",
+    "profile_library.preview": "Validate and preview",
+    "profile_library.properties": "Area: {area} mm² · Width: {width} mm · Height: {height} mm",
+    "profile_library.replace": "Replace existing profile names",
+    "profile_library.save_section": "Save section",
+    "profile_library.saved_section": "Saved section",
+    "profile_library.search": "Search profiles",
+    "profile_library.source_units": "From DXF header",
+    "profile_library.storage": "Profiles travel with the design. Save the design or export a library backup.",
+    "profile_library.units": "Source units"
+  }
+}

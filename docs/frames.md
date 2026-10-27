@@ -74,6 +74,15 @@ Every built-in profile is SolidCraft's own parametric definition, built in code
 dimensions of the stock you buy. Any other section, a vendor's aluminium extrusion for example, comes
 from a sketch: draw it or insert the vendor's DXF.
 
+## Reusable profiles
+
+The **Saved Profiles** editor imports supported planar ASCII DXF sections without
+redrawing them, validates holes and rejects blocks or disconnected material islands.
+Saved profiles and each member's selected revision travel with the design. Import,
+export and selection use the shared desktop/browser command path. See
+[Reusable structural profiles](profile-library.md) for supported geometry, preview,
+units, persistence and catalog commands.
+
 ## Built-in profiles
 
 A profile is JSON with a `kind` and its dimensions, each a number in the design's units or a

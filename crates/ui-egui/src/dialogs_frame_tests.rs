@@ -54,6 +54,69 @@ fn member(d: &mut Dialog) -> &mut Member {
     }
 }
 
+#[test]
+fn saved_profile_library_uses_shared_pickers_and_explicit_preview() {
+    let mut h = crate::scenario::Harness::new();
+    let entities = "0\nCIRCLE\n10\n0\n20\n0\n40\n10\n0\nCIRCLE\n10\n0\n20\n0\n40\n8\n";
+    let dxf = format!("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n");
+    std::fs::write(h.dir.join("tube.dxf"), dxf).unwrap();
+    h.step(&json!({"call":"ui.home","params":{"open":false}})).unwrap();
+    h.step(&json!({"start":"frame.profile.library"})).unwrap();
+    h.step(&json!({"choose_file":"tube.dxf"})).unwrap();
+    h.step(&json!({"widget":"Choose DXF…"})).unwrap();
+    h.frames(3);
+    let revision = h.app.run("document.revision", json!({})).unwrap();
+    h.step(&json!({"widget":"Validate and preview"})).unwrap();
+    assert!(h.app.run("frame.profile.library", json!({})).unwrap()["entries"].as_array().unwrap().is_empty());
+    assert_eq!(h.app.run("document.revision", json!({})).unwrap(), revision);
+    h.step(&json!({"widget":"Save section"})).unwrap();
+    let library = h.app.run("frame.profile.library", json!({})).unwrap();
+    assert_eq!(library["entries"][0]["name"], "tube");
+    assert_eq!(library["entries"][0]["region"]["holes"].as_array().unwrap().len(), 1);
+    h.step(&json!({"widget":"Export library…"})).unwrap();
+    h.frames(3);
+    let path = h.dir.join("profiles.solidcraft-profiles.json");
+    if !path.is_file() {
+        h.step(&json!({"debug":"widgets"})).unwrap();
+        h.step(&json!({"debug":"handles"})).unwrap();
+        eprintln!("picker busy: {}, dialog: {:?}", h.app.file_picker_busy(), h.app.dialog.as_ref().map(|d| &d.kind));
+    }
+    assert!(path.is_file(), "export picker must create the catalog");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(h.app.run("frame.profile.library", json!({})).unwrap()["entries"].as_array().unwrap().is_empty());
+    h.step(&json!({"choose_file":"profiles.solidcraft-profiles.json"})).unwrap();
+    h.step(&json!({"widget":"Import library…"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.run("frame.profile.library", json!({})).unwrap(), library);
+}
+
+#[test]
+fn saved_profile_library_opens_without_mutating_design() {
+    let mut app = frame_app();
+    let before = app.run("document.revision", json!({})).unwrap();
+    app.start("frame.profile.library");
+    assert!(app.dialog.is_some(), "Saved Profiles must open its shared desktop/web editor");
+    assert_eq!(app.run("document.revision", json!({})).unwrap(), before);
+}
+
+#[test]
+fn saved_profile_member_edit_keeps_its_pinned_revision() {
+    let mut app = frame_app();
+    app.run("frame.profile.save", json!({"name":"Bar","profile":{"kind":"bar","width":10,"height":20}})).unwrap();
+    app.run("frame.member", json!({"sketch":"Frame","profile_entry":"Bar"})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().id;
+    let mut dialog = edit_dialog(&app, feature, None).unwrap();
+    let pinned = member(&mut dialog).saved.clone().expect("saved member keeps its section");
+    app.run("frame.profile.save", json!({"name":"Bar","replace":true,"profile":{"kind":"bar","width":30,"height":20}})).unwrap();
+    member(&mut dialog).angle = "90 deg".into();
+    let commands = apply_commands(&app, &dialog).unwrap();
+    assert_eq!(commands[0].1["params"]["profile_snapshot"], serde_json::to_value(pinned).unwrap());
+    assert!(commands[0].1["params"].get("profile_entry").is_none());
+    run_all(&mut app, commands);
+    let measured = app.run("inspect.measure", json!({})).unwrap();
+    assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - 400000.0).abs() < 1e-4);
+}
+
 /// Picked lines and the default built-in profile make one member a line; Edit Feature refills
 /// the dialog and runs `timeline.redefine`, and the members keep their names.
 #[test]
