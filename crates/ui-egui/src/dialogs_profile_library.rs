@@ -84,6 +84,7 @@ pub struct Library {
     pub family: usize,
     family_search: String,
     size_search: String,
+    navigation_width: f32,
     sizes: Vec<Vec<DimensionRow>>,
     editing: Option<(Option<usize>, DimensionRow)>,
     sort: usize,
@@ -110,6 +111,7 @@ impl Default for Library {
             family: 0,
             family_search: String::new(),
             size_search: String::new(),
+            navigation_width: 300.0,
             sizes: illustrative_rows(),
             editing: None,
             sort: 0,
@@ -188,12 +190,108 @@ fn export_catalog(app: &mut SolveApp, token: Arc<()>, overwrite: bool) {
     });
 }
 
+/// Shows the profile library as a centered, resizable modal window with background shield.
+/// Returns `true` if the window was closed (via close button, Close action, or Esc).
+pub fn show_modal(app: &mut SolveApp, ctx: &egui::Context, library: &mut Library) -> bool {
+    let t = crate::theme::Tokens::get();
+    let screen = ctx.content_rect();
+
+    let width = (screen.width() * 0.78).clamp(840.0, 1140.0);
+    let cards = width / t.form_card_width;
+    let height = (screen.height() * 0.75).clamp(520.0, 760.0);
+    let heading = app.tr("cmd.frame.profile.library");
+
+    // Esc closes modal or cancels inner editing
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !app.esc_handled {
+        if library.editing.is_some() {
+            library.editing = None;
+            app.esc_handled = true;
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        } else if library.importing_dxf {
+            library.importing_dxf = false;
+            app.esc_handled = true;
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        }
+    }
+
+    let note = library.note.clone();
+    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_profile_library"), "library", heading)
+        .cards(cards)
+        .default_height(height)
+        .resizable(true)
+        .body_padding(true)
+        .actions("", app.tr("ui.close"), None)
+        .show_with_left(
+            ctx,
+            true,
+            |ui| {
+                rows(app, ui, library);
+            },
+            move |ui| {
+                if let Some(note) = &note {
+                    ui_kit::text(ui, note, ui_kit::Text::Hint("profile_footer_note"));
+                }
+            },
+        );
+
+    if library.editing.is_some() {
+        row_editor(app, ctx, library);
+    }
+    closed || action == ui_kit::Action::Cancel
+}
+
+fn row_valid(family: usize, rows: &[DimensionRow], index: Option<usize>, row: &DimensionRow) -> bool {
+    !row.code.trim().is_empty()
+        && !row.description.trim().is_empty()
+        && !rows.iter().enumerate().any(|(i, r)| Some(i) != index && r.code == row.code.trim())
+        && row.values.iter().enumerate().all(|(i, v)| {
+            v.parse::<f64>().is_ok_and(|n| n.is_finite() && if dimension_letter(family, i).starts_with('R') { n >= 0. } else { n > 0. })
+        })
+}
+
+fn row_editor(app: &SolveApp, ctx: &egui::Context, library: &mut Library) {
+    let family = library.family;
+    let Some((key, _)) = FAMILIES.get(family) else { return };
+    let Some(rows) = library.sizes.get_mut(family) else { return };
+    let Some((index, row)) = &mut library.editing else { return };
+    let valid = row_valid(family, rows, *index, row);
+    let title = if index.is_some() { app.tr("profile_library.edit") } else { app.tr("profile_library.add") };
+    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_profile_dimension_editor"), "library", title)
+        .fields()
+        .actions(app.tr("profile_library.save_row"), app.tr("profile_library.cancel"), None)
+        .show_modal(ctx, valid, |ui| {
+            ui_kit::text(ui, app.tr(key), ui_kit::Text::Heading("editor_family"));
+            crate::scenario::publish_count("profile_library:editor_family", family as f64);
+            schematic(ui, family);
+            ui_kit::text_row(ui, app.tr("profile_library.code"), &mut row.code, "");
+            ui_kit::text_row(ui, app.tr("profile_library.description"), &mut row.description, "");
+            for (i, value) in row.values.iter_mut().enumerate() {
+                ui_kit::text_row(ui, &dimension_letter(family, i), value, "mm");
+            }
+        });
+    if closed || action == ui_kit::Action::Cancel {
+        library.editing = None;
+    } else if action == ui_kit::Action::Ok && row_valid(family, rows, *index, row) {
+        row.code = row.code.trim().into();
+        if let Some(target) = index.and_then(|i| rows.get_mut(i)) {
+            *target = row.clone();
+        } else {
+            rows.push(row.clone());
+        }
+        library.editing = None;
+    }
+}
+
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, library: &mut Library) {
     let t = crate::theme::Tokens::get();
 
     // Top bar: note on left, catalog import/export on right
     ui.horizontal(|ui| {
-        ui_kit::text(ui, app.tr("profile_library.storage"), ui_kit::Text::Hint("profile_storage"));
+        let right_reserve = 300.0;
+        let text_width = (ui.available_width() - right_reserve).max(80.0);
+        ui.allocate_ui_with_layout(egui::vec2(text_width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui_kit::text(ui, app.tr("profile_library.storage"), ui_kit::Text::Hint("profile_storage"));
+        });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let export = ui_kit::button(ui, app.tr("profile_library.export_catalog"), ui_kit::Button::Normal);
             crate::scenario::publish_handle("profile_library:export", export.rect.center());
@@ -209,10 +307,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, library: &mut Library) {
     });
     ui.separator();
 
+    let full_height = ui.available_height();
     ui.horizontal_top(|ui| {
         // Left column: section families navigation
-        let nav_width = (t.form_card_width * 0.95).max(250.0);
-        ui.allocate_ui_with_layout(egui::vec2(nav_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+        let max_width = (ui.available_width() - 200.0 - t.space_8).clamp(0.0, 520.0);
+        let nav_width = library.navigation_width.clamp(220.0_f32.min(max_width), max_width);
+        let (nav_rect, _) = ui.allocate_exact_size(egui::vec2(nav_width.min(ui.available_width()), full_height), egui::Sense::hover());
+        let mut nav =
+            ui.new_child(egui::UiBuilder::new().max_rect(nav_rect).id_salt("profile_navigation").layout(egui::Layout::top_down(egui::Align::Min)));
+        nav.set_clip_rect(nav.clip_rect().intersect(nav_rect));
+        {
+            let ui = &mut nav;
             ui_kit::text(ui, app.tr("profile_library.families"), ui_kit::Text::Heading("families"));
             ui_kit::text_row(ui, app.tr("profile_library.family_search"), &mut library.family_search, "");
             let query = library.family_search.to_lowercase();
@@ -228,7 +333,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, library: &mut Library) {
             );
             ui.add_space(t.space_4);
 
-            egui::ScrollArea::vertical().max_height(ui.available_height().max(350.0)).show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt("profile_families_scroll").auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = t.space_6;
                 for (index, (key, desc)) in visible {
                     let is_selected = library.family == index;
@@ -259,28 +364,60 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, library: &mut Library) {
                     let title_color = if is_selected { t.selected_ink } else { t.text };
                     let desc_color = if is_selected { t.selected_ink.gamma_multiply(0.85) } else { t.form_dim };
 
-                    ui.painter().text(egui::pos2(text_rect.left(), text_rect.top()), egui::Align2::LEFT_TOP, app.tr(key), title_font, title_color);
-                    ui.painter().text(
-                        egui::pos2(text_rect.left(), text_rect.top() + 18.0),
-                        egui::Align2::LEFT_TOP,
-                        app.tr(desc),
-                        desc_font,
-                        desc_color,
-                    );
+                    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect));
+                    painter.text(egui::pos2(text_rect.left(), text_rect.top()), egui::Align2::LEFT_TOP, app.tr(key), title_font, title_color);
+                    painter.text(egui::pos2(text_rect.left(), text_rect.top() + 18.0), egui::Align2::LEFT_TOP, app.tr(desc), desc_font, desc_color);
+                    response.on_hover_text(format!("{}\n{}", app.tr(key), app.tr(desc)));
                 }
             });
-        });
+        }
 
-        ui.separator();
+        let (rail, response) = ui.allocate_exact_size(egui::vec2(t.space_8, full_height), egui::Sense::click_and_drag());
+        let response = response.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        ui.painter().rect_filled(
+            rail.shrink2(egui::vec2(t.space_2, 0.0)),
+            t.radius_sm,
+            if response.hovered() || response.has_focus() { t.form_primary } else { t.dialog_rule },
+        );
+        if response.clicked() || response.drag_started() {
+            response.request_focus();
+        }
+        if response.has_focus() {
+            let step = ui.input_mut(|i| {
+                let left = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft);
+                let right = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight);
+                i32::from(right) - i32::from(left)
+            });
+            library.navigation_width = (nav_width + step as f32 * t.space_16).clamp(220.0_f32.min(max_width), max_width);
+        }
+        if response.dragged() {
+            let delta = ui.input(|i| i.pointer.delta().x);
+            if delta.is_finite() {
+                library.navigation_width = (nav_width + delta).clamp(220.0_f32.min(max_width), max_width);
+            }
+        }
+        crate::scenario::publish_rect("profile_library:resize", rail);
 
         // Right column: family detail, table or custom cards
-        ui.vertical(|ui| {
+        let (detail_rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(0.0), full_height), egui::Sense::hover());
+        crate::scenario::publish_rect("profile_library:detail", detail_rect);
+        let mut detail =
+            ui.new_child(egui::UiBuilder::new().max_rect(detail_rect).id_salt("profile_detail").layout(egui::Layout::top_down(egui::Align::Min)));
+        detail.set_clip_rect(detail.clip_rect().intersect(detail_rect));
+        {
+            let ui = &mut detail;
             if library.family == 0 {
                 custom_rows(app, ui, library);
             } else {
-                standard_rows(app, ui, library);
+                let scroll = egui::ScrollArea::vertical()
+                    .id_salt(("profile_detail_scroll", library.family))
+                    .max_height(detail_rect.height())
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| standard_rows(app, ui, library));
+                crate::scenario::publish_rect("profile_library:detail_scroll", scroll.inner_rect);
+                crate::scenario::publish_count("profile_library:detail_content_height", f64::from(scroll.content_size.y));
             }
-        });
+        }
     });
 }
 
@@ -302,91 +439,93 @@ fn custom_rows(app: &mut SolveApp, ui: &mut egui::Ui, library: &mut Library) {
     });
 
     if library.importing_dxf {
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui_kit::text(ui, app.tr("cmd.frame.profile.import_dxf"), ui_kit::Text::Heading("dxf_title"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui_kit::button(ui, app.tr("profile_library.back_to_profiles"), ui_kit::Button::Small).clicked() {
-                        library.importing_dxf = false;
-                    }
-                });
-            });
-            ui.separator();
-            ui_kit::text_row(ui, app.tr("profile_library.name"), &mut library.name, "");
-            ui_kit::text_row(ui, app.tr("profile_library.file"), &mut library.path, "");
-            let choose = ui_kit::button(ui, app.tr("profile_library.choose_dxf"), ui_kit::Button::Normal);
-            crate::scenario::publish_handle("profile_library:choose", choose.rect.center());
-            if choose.clicked() {
-                choose_dxf(app, library.token.clone());
-            }
-            let labels = [app.tr("profile_library.source_units"), "mm", "cm", "m", "in", "ft"];
-            ui_kit::choice_row(ui, app.tr("profile_library.units"), "profile_source_units", &mut library.units, &labels);
-            ui_kit::text_row(ui, app.tr("profile_library.origin_x"), &mut library.origin[0], "0");
-            ui_kit::text_row(ui, app.tr("profile_library.origin_y"), &mut library.origin[1], "0");
-            ui_kit::checkbox(ui, app.tr("profile_library.replace"), &mut library.replace);
-            let draft = library.draft();
-            if library.binding.as_ref() != draft.as_ref().ok() {
-                library.preview = None;
-                library.binding = None;
-            }
-            ui.horizontal(|ui| {
-                let preview = ui_kit::button(
-                    ui,
-                    app.tr("profile_library.preview"),
-                    ui_kit::Button::Enabled(!library.name.trim().is_empty() && !library.path.is_empty()),
-                );
-                crate::scenario::publish_handle("profile_library:preview", preview.rect.center());
-                if preview.clicked() {
-                    let result = draft.clone().and_then(|p| app.run("frame.profile.inspect_dxf", p));
-                    match result {
-                        Ok(result) => match result.get("entry").cloned().and_then(|v| serde_json::from_value::<SavedProfile>(v).ok()) {
-                            Some(profile) => {
-                                library.preview = Some(profile);
-                                library.binding = draft.clone().ok();
-                                library.note = None;
-                            }
-                            None => library.note = Some(app.tr("profile_library.invalid_preview").into()),
-                        },
-                        Err(error) => library.note = Some(error),
-                    }
-                }
-                let import = ui_kit::button(ui, app.tr("profile_library.save_section"), ui_kit::Button::Enabled(library.preview.is_some()));
-                crate::scenario::publish_handle("profile_library:save", import.rect.center());
-                if import.clicked()
-                    && let Some(profile) = &library.preview
-                {
-                    let result = draft.and_then(|mut p| {
-                        p["replace"] = json!(library.replace);
-                        p["expected_revision"] = json!(profile.revision);
-                        app.run("frame.profile.import_dxf", p)
-                    });
-                    match result {
-                        Ok(_) => {
-                            library.selected = Some(profile.name.clone());
-                            library.note = Some(app.tr("profile_library.imported").into());
+        egui::ScrollArea::vertical().id_salt("profile_dxf_import_scroll").auto_shrink([false, false]).show(ui, |ui| {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui_kit::text(ui, app.tr("cmd.frame.profile.import_dxf"), ui_kit::Text::Heading("dxf_title"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui_kit::button(ui, app.tr("profile_library.back_to_profiles"), ui_kit::Button::Small).clicked() {
                             library.importing_dxf = false;
                         }
-                        Err(error) => {
-                            library.note = Some(error);
-                            library.preview = None;
-                            library.binding = None;
+                    });
+                });
+                ui.separator();
+                ui_kit::text_row(ui, app.tr("profile_library.name"), &mut library.name, "");
+                ui_kit::text_row(ui, app.tr("profile_library.file"), &mut library.path, "");
+                let choose = ui_kit::button(ui, app.tr("profile_library.choose_dxf"), ui_kit::Button::Normal);
+                crate::scenario::publish_handle("profile_library:choose", choose.rect.center());
+                if choose.clicked() {
+                    choose_dxf(app, library.token.clone());
+                }
+                let labels = [app.tr("profile_library.source_units"), "mm", "cm", "m", "in", "ft"];
+                ui_kit::choice_row(ui, app.tr("profile_library.units"), "profile_source_units", &mut library.units, &labels);
+                ui_kit::text_row(ui, app.tr("profile_library.origin_x"), &mut library.origin[0], "0");
+                ui_kit::text_row(ui, app.tr("profile_library.origin_y"), &mut library.origin[1], "0");
+                ui_kit::checkbox(ui, app.tr("profile_library.replace"), &mut library.replace);
+                let draft = library.draft();
+                if library.binding.as_ref() != draft.as_ref().ok() {
+                    library.preview = None;
+                    library.binding = None;
+                }
+                ui.horizontal(|ui| {
+                    let preview = ui_kit::button(
+                        ui,
+                        app.tr("profile_library.preview"),
+                        ui_kit::Button::Enabled(!library.name.trim().is_empty() && !library.path.is_empty()),
+                    );
+                    crate::scenario::publish_handle("profile_library:preview", preview.rect.center());
+                    if preview.clicked() {
+                        let result = draft.clone().and_then(|p| app.run("frame.profile.inspect_dxf", p));
+                        match result {
+                            Ok(result) => match result.get("entry").cloned().and_then(|v| serde_json::from_value::<SavedProfile>(v).ok()) {
+                                Some(profile) => {
+                                    library.preview = Some(profile);
+                                    library.binding = draft.clone().ok();
+                                    library.note = None;
+                                }
+                                None => library.note = Some(app.tr("profile_library.invalid_preview").into()),
+                            },
+                            Err(error) => library.note = Some(error),
                         }
                     }
+                    let import = ui_kit::button(ui, app.tr("profile_library.save_section"), ui_kit::Button::Enabled(library.preview.is_some()));
+                    crate::scenario::publish_handle("profile_library:save", import.rect.center());
+                    if import.clicked()
+                        && let Some(profile) = &library.preview
+                    {
+                        let result = draft.and_then(|mut p| {
+                            p["replace"] = json!(library.replace);
+                            p["expected_revision"] = json!(profile.revision);
+                            app.run("frame.profile.import_dxf", p)
+                        });
+                        match result {
+                            Ok(_) => {
+                                library.selected = Some(profile.name.clone());
+                                library.note = Some(app.tr("profile_library.imported").into());
+                                library.importing_dxf = false;
+                            }
+                            Err(error) => {
+                                library.note = Some(error);
+                                library.preview = None;
+                                library.binding = None;
+                            }
+                        }
+                    }
+                });
+                if let Some(profile) = library.preview.as_ref() {
+                    preview_region(ui, &profile.region);
+                    let section = frame::section(&profile.region);
+                    let properties = crate::i18n::format(
+                        "profile_library.properties",
+                        &[
+                            ("area", &format!("{:.3}", section.area)),
+                            ("width", &format!("{:.3}", section.width)),
+                            ("height", &format!("{:.3}", section.height)),
+                        ],
+                    );
+                    ui_kit::text(ui, &properties, ui_kit::Text::Hint("profile_properties"));
                 }
             });
-            if let Some(profile) = library.preview.as_ref() {
-                preview_region(ui, &profile.region);
-                let section = frame::section(&profile.region);
-                let properties = crate::i18n::format(
-                    "profile_library.properties",
-                    &[
-                        ("area", &format!("{:.3}", section.area)),
-                        ("width", &format!("{:.3}", section.width)),
-                        ("height", &format!("{:.3}", section.height)),
-                    ],
-                );
-                ui_kit::text(ui, &properties, ui_kit::Text::Hint("profile_properties"));
-            }
         });
         if let Some(note) = &library.note {
             ui_kit::text(ui, note, ui_kit::Text::Hint("profile_note"));
@@ -394,42 +533,53 @@ fn custom_rows(app: &mut SolveApp, ui: &mut egui::Ui, library: &mut Library) {
         return;
     }
 
-    ui_kit::text_row(ui, app.tr("profile_library.custom_search"), &mut library.search, "");
+    let search_width = ui.available_width().min(t.form_card_width);
+    ui.allocate_ui_with_layout(egui::vec2(search_width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui_kit::text_row(ui, app.tr("profile_library.custom_search"), &mut library.search, "");
+    });
     let query = library.search.to_lowercase();
     let entries: Vec<_> = app.session.doc.frame_profiles.values().filter(|p| p.name.to_lowercase().contains(&query)).collect();
     if entries.is_empty() {
         ui_kit::text(ui, app.tr("profile_library.custom_empty"), ui_kit::Text::Hint("profile_empty"));
     }
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        let card_w = (ui.available_width() * 0.48 - t.space_6).max(140.0);
-        for pair in entries.chunks(2) {
+    egui::ScrollArea::vertical().id_salt("profile_custom_cards_scroll").auto_shrink([false, false]).show(ui, |ui| {
+        let available = ui.available_width().max(0.0);
+        let gap = ui.spacing().item_spacing.x;
+        let columns = if available >= t.form_card_width * 2.0 + gap { 2 } else { 1 };
+        // Include both frame margins and borders in each card's allocated width.
+        let card_w = ((available - gap * (columns - 1) as f32) / columns as f32 - t.space_10 * 2.0 - 2.0).max(0.0);
+        for pair in entries.chunks(columns) {
             ui.horizontal_top(|ui| {
                 for entry in pair {
                     let is_sel = library.selected.as_ref() == Some(&entry.name);
                     let frame_stroke = if is_sel { t.primary_border(t.form_primary) } else { t.container_border(t.border) };
                     let frame_bg = if is_sel { t.selected_bg } else { t.control_fill };
                     egui::Frame::new().fill(frame_bg).stroke(frame_stroke).corner_radius(t.radius_md).inner_margin(t.space_10).show(ui, |ui| {
-                        ui.set_width(card_w);
-                        preview_region(ui, &entry.region);
-                        ui.add_space(t.space_4);
-                        ui_kit::text(ui, &entry.name, ui_kit::Text::Heading("custom_card_name"));
-                        let section = frame::section(&entry.region);
-                        let properties = crate::i18n::format(
-                            "profile_library.properties",
-                            &[
-                                ("area", &format!("{:.1}", section.area)),
-                                ("width", &format!("{:.1}", section.width)),
-                                ("height", &format!("{:.1}", section.height)),
-                            ],
-                        );
-                        ui_kit::text(ui, &properties, ui_kit::Text::Hint("profile_properties"));
-                        ui.add_space(t.space_4);
-                        ui.horizontal(|ui| {
-                            let style = if is_sel { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
-                            if ui_kit::button(ui, app.tr("profile_library.select"), style).clicked() {
-                                library.selected = Some(entry.name.clone());
-                            }
+                        // The containing card row is horizontal; the card body must not
+                        // inherit it or the preview squeezes every following field.
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                            ui.set_width(card_w);
+                            preview_region(ui, &entry.region);
+                            ui.add_space(t.space_4);
+                            ui.add(egui::Label::new(egui::RichText::new(&entry.name).strong().color(t.text)).wrap());
+                            let section = frame::section(&entry.region);
+                            let properties = crate::i18n::format(
+                                "profile_library.properties",
+                                &[
+                                    ("area", &format!("{:.1}", section.area)),
+                                    ("width", &format!("{:.1}", section.width)),
+                                    ("height", &format!("{:.1}", section.height)),
+                                ],
+                            );
+                            ui.add(egui::Label::new(egui::RichText::new(&properties).size(t.font_small).color(t.form_dim)).wrap());
+                            ui.add_space(t.space_4);
+                            ui.horizontal(|ui| {
+                                let style = if is_sel { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
+                                if ui_kit::button(ui, app.tr("profile_library.select"), style).clicked() {
+                                    library.selected = Some(entry.name.clone());
+                                }
+                            });
                         });
                     });
                 }
@@ -444,29 +594,65 @@ fn custom_rows(app: &mut SolveApp, ui: &mut egui::Ui, library: &mut Library) {
 }
 
 fn standard_rows(app: &SolveApp, ui: &mut egui::Ui, library: &mut Library) {
+    let t = crate::theme::Tokens::get();
     let family = library.family;
     let Some((key, _)) = FAMILIES.get(family) else { return };
     ui_kit::text(ui, app.tr(key), ui_kit::Text::Heading("standard_family"));
     ui_kit::text(ui, app.tr("profile_library.schematic"), ui_kit::Text::Hint("schematic"));
-    schematic(ui, family);
-    ui_kit::text(ui, app.tr("profile_library.illustrative"), ui_kit::Text::Hint("illustrative"));
-    ui_kit::text(ui, app.tr("profile_library.dimensions"), ui_kit::Text::Heading("dimensions"));
-    ui_kit::text_row(ui, app.tr("profile_library.size_search"), &mut library.size_search, "");
-    let Some(rows) = library.sizes.get_mut(family) else { return };
-    let template = illustrative_rows().get(family).and_then(|r| r.first()).cloned();
-    if ui_kit::button(ui, app.tr("profile_library.add"), ui_kit::Button::Normal).clicked() {
-        library.editing = template.map(|mut row| {
-            row.code.clear();
-            (None, row)
+    let diagram_width = 300.0_f32.min(ui.available_width());
+    let guide_width = guide_intrinsic_width(app, ui).min(ui.available_width());
+    if ui.available_width() >= diagram_width + t.space_16 + guide_width {
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(egui::vec2(diagram_width, 150.0), egui::Layout::top_down(egui::Align::Min), |ui| schematic(ui, family));
+            ui.add_space(t.space_16);
+            dimension_guide(app, ui, guide_width);
         });
+    } else {
+        schematic(ui, family);
+        dimension_guide(app, ui, guide_width);
     }
+    ui.add_space(t.space_8);
+    ui_kit::text(ui, app.tr("profile_library.dimensions"), ui_kit::Text::Heading("dimensions"));
+
+    ui.horizontal(|ui| {
+        let add_width =
+            ui.painter().layout_no_wrap(app.tr("profile_library.add").to_owned(), egui::FontId::proportional(t.font_label), t.form_ink).size().x
+                + ui.spacing().button_padding.x * 2.0
+                + t.space_8;
+        let search_width = (ui.available_width() - add_width - ui.spacing().item_spacing.x).max(0.0).min(t.form_card_width);
+        ui.allocate_ui_with_layout(egui::vec2(search_width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui_kit::text_row(ui, app.tr("profile_library.size_search"), &mut library.size_search, "");
+        });
+        let template = illustrative_rows().get(family).and_then(|r| r.first()).cloned();
+        if ui_kit::button(ui, app.tr("profile_library.add"), ui_kit::Button::Normal).clicked() {
+            library.editing = template.map(|mut row| {
+                row.code.clear();
+                (None, row)
+            });
+        }
+    });
+
+    let Some(rows) = library.sizes.get_mut(family) else { return };
     let count = rows.first().map_or_else(|| template_dimension_count(family), |row| row.values.len());
     let dimension_labels: Vec<_> = (0..count).map(|i| dimension_letter(family, i)).collect();
-    ui_kit::text(ui, &dimension_labels.join(" · "), ui_kit::Text::Hint("dimension_legend"));
     let mut labels = vec![app.tr("profile_library.code").to_owned(), app.tr("profile_library.description").to_owned()];
     labels.extend(dimension_labels.iter().map(|s| format!("{s} (mm)")));
     labels.push(app.tr("profile_library.actions").into());
-    let columns: Vec<_> = labels.iter().map(|label| ui_kit::Column::new(label, 1.0)).collect();
+
+    let columns: Vec<_> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, label)| {
+            let min_w = match i {
+                0 => 85.0,
+                1 => 130.0,
+                _ if i + 1 == labels.len() => 90.0,
+                _ => 75.0,
+            };
+            ui_kit::Column::new(label, 1.0).min_content_width(min_w)
+        })
+        .collect();
+
     let query = library.size_search.to_lowercase();
     let mut visible: Vec<_> = rows
         .iter()
@@ -488,74 +674,89 @@ fn standard_rows(app: &SolveApp, ui: &mut egui::Ui, library: &mut Library) {
     });
     ui_kit::text(ui, &crate::i18n::format("profile_library.size_count", &[("count", &visible.len().to_string())]), ui_kit::Text::Hint("size_count"));
     let mut delete = None;
-    ui_kit::table_custom(ui, "profile_dimensions", &columns, app.tr("profile_library.empty"), |ui, table| {
-        table.headers(ui, |ui, column| {
-            if column + 1 == labels.len() {
-                return false;
-            }
-            if ui_kit::button(ui, &labels[column], ui_kit::Button::Small).clicked() {
-                library.descending = library.sort == column && !library.descending;
-                library.sort = column;
-            }
-            true
-        });
-        for (index, row) in visible {
-            table.row(ui, &index.to_string(), false, |cells| {
-                cells.cell(|ui| {
-                    ui_kit::text(ui, &row.code, ui_kit::Text::Cell);
-                });
-                cells.cell(|ui| {
-                    ui_kit::text(ui, &row.description, ui_kit::Text::Cell);
-                });
-                for value in &row.values {
-                    cells.cell(|ui| {
-                        ui_kit::text(ui, value, ui_kit::Text::MonoCell);
-                    });
+    // The detail pane owns vertical scrolling, including the guide.
+    // The table retains only its shared horizontal scroll area.
+    {
+        ui_kit::table_custom(ui, "profile_dimensions", &columns, app.tr("profile_library.empty"), |ui, table| {
+            table.headers(ui, |ui, column| {
+                if column + 1 == labels.len() {
+                    return false;
                 }
-                cells.cell(|ui| {
-                    if ui_kit::button(ui, app.tr("profile_library.edit"), ui_kit::Button::Small).clicked() {
-                        library.editing = Some((Some(index), row.clone()));
-                    }
-                    if ui_kit::button(ui, app.tr("profile_library.delete"), ui_kit::Button::Small).clicked() {
-                        delete = Some(index);
-                    }
-                });
+                if ui_kit::button(ui, &labels[column], ui_kit::Button::Small).clicked() {
+                    library.descending = library.sort == column && !library.descending;
+                    library.sort = column;
+                }
+                true
             });
-        }
-    });
+            for (index, row) in visible {
+                table.row(ui, &index.to_string(), false, |cells| {
+                    cells.cell(|ui| {
+                        ui_kit::text(ui, &row.code, ui_kit::Text::Cell);
+                    });
+                    cells.cell(|ui| {
+                        ui_kit::text(ui, &row.description, ui_kit::Text::Cell);
+                    });
+                    for value in &row.values {
+                        cells.cell(|ui| {
+                            ui_kit::text(ui, value, ui_kit::Text::MonoCell);
+                        });
+                    }
+                    cells.cell(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.push_id(index, |ui| {
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
+                                ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
+                                let edit = ui_kit::icon_button_at(ui, rect, "edit", app.tr("profile_library.edit"));
+                                crate::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "edit", t.selected_ink);
+                                if edit.clicked() {
+                                    library.editing = Some((Some(index), row.clone()));
+                                }
+                                if ui_kit::bin_button(ui, app.tr("profile_library.delete")).clicked() {
+                                    delete = Some(index);
+                                }
+                            });
+                        });
+                    });
+                });
+            }
+        });
+    }
     if let Some(index) = delete {
         rows.remove(index);
         library.editing = None;
     }
-    let mut commit = false;
-    let mut cancel = false;
-    if let Some((index, row)) = &mut library.editing {
-        ui.separator();
-        ui_kit::text_row(ui, app.tr("profile_library.code"), &mut row.code, "");
-        ui_kit::text_row(ui, app.tr("profile_library.description"), &mut row.description, "");
-        for (i, value) in row.values.iter_mut().enumerate() {
-            ui_kit::text_row(ui, &dimension_letter(family, i), value, "mm");
-        }
-        let valid = !row.code.trim().is_empty()
-            && !row.description.trim().is_empty()
-            && !rows.iter().enumerate().any(|(i, r)| Some(i) != *index && r.code == row.code.trim())
-            && row.values.iter().enumerate().all(|(i, v)| {
-                v.parse::<f64>().is_ok_and(|n| n.is_finite() && if dimension_letter(family, i).starts_with('R') { n >= 0. } else { n > 0. })
-            });
-        commit = ui_kit::button(ui, app.tr("profile_library.save_row"), ui_kit::Button::Enabled(valid)).clicked();
-        cancel = ui_kit::button(ui, app.tr("profile_library.cancel"), ui_kit::Button::Normal).clicked();
-    }
-    if commit && let Some((index, mut row)) = library.editing.take() {
-        row.code = row.code.trim().into();
-        if let Some(target) = index.and_then(|i| rows.get_mut(i)) {
-            *target = row;
-        } else {
-            rows.push(row);
-        }
-    }
-    if cancel {
-        library.editing = None;
-    }
+}
+
+fn guide_intrinsic_width(app: &SolveApp, ui: &egui::Ui) -> f32 {
+    let t = crate::theme::Tokens::get();
+    [
+        "profile_library.guide_title",
+        "profile_library.guide_ab",
+        "profile_library.guide_cd",
+        "profile_library.guide_r",
+        "profile_library.guide_temporary",
+    ]
+    .iter()
+    .map(|key| ui.painter().layout_no_wrap(app.tr(key).to_owned(), egui::FontId::proportional(t.font_small), t.form_dim).size().x)
+    .fold(0.0_f32, f32::max)
+        + t.space_16 * 2.0
+}
+
+fn dimension_guide(app: &SolveApp, ui: &mut egui::Ui, width: f32) {
+    let t = crate::theme::Tokens::get();
+    egui::Frame::new().fill(t.control_fill).stroke(t.container_border(t.border)).corner_radius(t.radius_md).inner_margin(t.space_12).show(ui, |ui| {
+        // Frame inherits the schematic row's horizontal layout; explicitly stack
+        // guide lines instead of consuming the remaining width line by line.
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_width((width - t.space_12 * 2.0).max(0.0));
+            ui.add(egui::Label::new(egui::RichText::new(app.tr("profile_library.guide_title")).size(t.font_small).strong().color(t.text)).wrap());
+            for key in ["profile_library.guide_ab", "profile_library.guide_cd", "profile_library.guide_r"] {
+                ui.add(egui::Label::new(egui::RichText::new(app.tr(key)).size(t.font_small).color(t.form_dim)).wrap());
+            }
+            ui.separator();
+            ui.add(egui::Label::new(egui::RichText::new(app.tr("profile_library.guide_temporary")).size(t.font_small).color(t.form_dim)).wrap());
+        });
+    });
 }
 
 fn template_dimension_count(family: usize) -> usize {
@@ -569,7 +770,7 @@ fn base_dimension_count(family: usize) -> usize {
         3 => 3,
         4 => 2,
         5 => 3,
-        6 | 7 | 8 => 4,
+        6..=8 => 4,
         _ => 0,
     }
 }
@@ -579,12 +780,34 @@ fn dimension_letter(family: usize, index: usize) -> String {
     if index < base { char::from(b'A' + index as u8).to_string() } else { format!("R{}", index - base + 1) }
 }
 
+// Fill orthogonal concave outlines in horizontal strips; egui polygons are convex.
+fn paint_section(p: &egui::Painter, points: Vec<egui::Pos2>, fill: egui::Color32, stroke: egui::Stroke) {
+    let mut ys: Vec<_> = points.iter().map(|p| p.y).collect();
+    ys.sort_by(f32::total_cmp);
+    ys.dedup();
+    for band in ys.windows(2) {
+        let mid = (band[0] + band[1]) * 0.5;
+        let mut xs: Vec<_> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .take(points.len())
+            .filter_map(|(a, b)| (a.y.min(b.y) < mid && mid < a.y.max(b.y)).then_some(a.x))
+            .collect();
+        xs.sort_by(f32::total_cmp);
+        for pair in xs.as_chunks::<2>().0 {
+            p.rect_filled(egui::Rect::from_min_max(egui::pos2(pair[0], band[0]), egui::pos2(pair[1], band[1])), 0.0, fill);
+        }
+    }
+    p.add(egui::Shape::closed_line(points, stroke));
+}
+
 fn paint_family_icon(p: &egui::Painter, rect: egui::Rect, family: usize, selected: bool) {
     let t = crate::theme::Tokens::get();
     let center = rect.center();
     let s = rect.width() * 0.36;
     let stroke = egui::Stroke::new(1.6, if selected { t.selected_ink } else { t.form_primary });
-    let fill = if selected { t.selected_bg } else { t.control_fill };
+    let fill = if selected { t.form_primary } else { t.selected_bg };
+    let hole = if selected { t.selected_bg } else { t.dialog_body };
 
     match family {
         0 => {
@@ -597,11 +820,11 @@ fn paint_family_icon(p: &egui::Painter, rect: egui::Rect, family: usize, selecte
                 center + egui::vec2(s * 0.8, s),
                 center + egui::vec2(-s * 0.8, s),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, fill, stroke);
             p.rect(
                 egui::Rect::from_center_size(center + egui::vec2(-s * 0.25, s * 0.25), egui::vec2(s * 0.45, s * 0.45)),
                 0.0,
-                egui::Color32::TRANSPARENT,
+                hole,
                 stroke,
                 egui::StrokeKind::Inside,
             );
@@ -617,18 +840,12 @@ fn paint_family_icon(p: &egui::Painter, rect: egui::Rect, family: usize, selecte
         3 => {
             // Rect tube (hollow box)
             p.rect(egui::Rect::from_center_size(center, egui::vec2(s * 1.8, s * 1.8)), t.radius_sm, fill, stroke, egui::StrokeKind::Inside);
-            p.rect(
-                egui::Rect::from_center_size(center, egui::vec2(s * 1.0, s * 1.0)),
-                0.0,
-                egui::Color32::TRANSPARENT,
-                stroke,
-                egui::StrokeKind::Inside,
-            );
+            p.rect(egui::Rect::from_center_size(center, egui::vec2(s * 1.0, s * 1.0)), 0.0, hole, stroke, egui::StrokeKind::Inside);
         }
         4 => {
             // Round tube (hollow circle)
             p.circle(center, s * 0.9, fill, stroke);
-            p.circle(center, s * 0.55, egui::Color32::TRANSPARENT, stroke);
+            p.circle(center, s * 0.55, hole, stroke);
         }
         5 => {
             // Angle (L-shape)
@@ -640,7 +857,7 @@ fn paint_family_icon(p: &egui::Painter, rect: egui::Rect, family: usize, selecte
                 center + egui::vec2(s, s),
                 center + egui::vec2(-s, s),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, fill, stroke);
         }
         6 => {
             // Channels / UPN (U-shape)
@@ -654,7 +871,7 @@ fn paint_family_icon(p: &egui::Painter, rect: egui::Rect, family: usize, selecte
                 center + egui::vec2(-s * 0.25, -s * 0.45),
                 center + egui::vec2(s * 0.8, -s * 0.45),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, fill, stroke);
         }
         7 => {
             // I-Beam / IPN (I-shape)
@@ -672,7 +889,7 @@ fn paint_family_icon(p: &egui::Painter, rect: egui::Rect, family: usize, selecte
                 center + egui::vec2(-s * 0.2, -s * 0.5),
                 center + egui::vec2(-s * 0.8, -s * 0.5),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, fill, stroke);
         }
         _ => {
             // C-section
@@ -690,7 +907,7 @@ fn paint_family_icon(p: &egui::Painter, rect: egui::Rect, family: usize, selecte
                 center + egui::vec2(s * 0.45, -s * 0.6),
                 center + egui::vec2(s * 0.45, -s * 0.35),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, fill, stroke);
         }
     }
 }
@@ -774,7 +991,7 @@ fn schematic(ui: &mut egui::Ui, family: usize) {
                 center + egui::vec2(scale, scale),
                 center + egui::vec2(-scale, scale),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, t.selected_bg, stroke);
             let y = center.y + scale + 14.0;
             p.line_segment([egui::pos2(center.x - scale, y), egui::pos2(center.x + scale, y)], dim_stroke);
             p.text(egui::pos2(center.x, y + 2.0), egui::Align2::CENTER_TOP, "A", dim_font.clone(), t.form_dim);
@@ -795,7 +1012,7 @@ fn schematic(ui: &mut egui::Ui, family: usize) {
                 center + egui::vec2(-scale * 0.2, -scale * 0.6),
                 center + egui::vec2(scale * 0.7, -scale * 0.6),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, t.selected_bg, stroke);
             let y = center.y + scale + 14.0;
             p.line_segment([egui::pos2(center.x - scale * 0.7, y), egui::pos2(center.x + scale * 0.7, y)], dim_stroke);
             p.text(egui::pos2(center.x, y + 2.0), egui::Align2::CENTER_TOP, "A", dim_font.clone(), t.form_dim);
@@ -821,7 +1038,7 @@ fn schematic(ui: &mut egui::Ui, family: usize) {
                 center + egui::vec2(-scale * 0.15, -scale * 0.6),
                 center + egui::vec2(-scale * 0.7, -scale * 0.6),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, t.selected_bg, stroke);
             let y = center.y + scale + 14.0;
             p.line_segment([egui::pos2(center.x - scale * 0.7, y), egui::pos2(center.x + scale * 0.7, y)], dim_stroke);
             p.text(egui::pos2(center.x, y + 2.0), egui::Align2::CENTER_TOP, "A", dim_font.clone(), t.form_dim);
@@ -847,7 +1064,7 @@ fn schematic(ui: &mut egui::Ui, family: usize) {
                 center + egui::vec2(scale * 0.5, -scale * 0.65),
                 center + egui::vec2(scale * 0.5, -scale * 0.4),
             ];
-            p.add(egui::Shape::closed_line(pts, stroke));
+            paint_section(p, pts, t.selected_bg, stroke);
             let y = center.y + scale + 14.0;
             p.line_segment([egui::pos2(center.x - scale * 0.7, y), egui::pos2(center.x + scale * 0.7, y)], dim_stroke);
             p.text(egui::pos2(center.x, y + 2.0), egui::Align2::CENTER_TOP, "A", dim_font.clone(), t.form_dim);

@@ -17,7 +17,7 @@ const IMPORT: TypedContract<ImportParams> = TypedContract::new();
 const EXPORT: TypedContract<ExportParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.profile.library", "Saved Profiles", crate::checked!("frame.profile.library", library))
+    CommandSpec::new("frame.profile.library", "Profile Library", crate::checked!("frame.profile.library", library))
         .at("WELDMENTS", "CREATE").icon("library").noundo().contract(&LIBRARY).output(output_schema_for::<LibraryResult>)
         .params("Returns entries: the design's reusable profiles, each with name, source, revision and region in mm"),
     CommandSpec::new("frame.profile.inspect_dxf", "Preview Profile DXF", crate::checked!("frame.profile.inspect_dxf", inspect_dxf))

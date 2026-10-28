@@ -76,3 +76,27 @@ All numeric rows source: `assets/styles/ui/palettes.rs`, `Tokens::light()`. `the
 
 ## Self-check
 All boards repeat this scoped color/dimension set and the two browser font mappings. No external resources. No application functionality or default change.
+
+## Dark palette — profile library baseline
+Source: `assets/styles/ui/palettes.rs`, `Tokens::dark()`; inherited dimensions and browser font mappings above remain unchanged.
+
+Token | Value
+--- | ---
+`app_bar` | `#1c1f26`
+`toolbar` / `panel` / `dialog_body` / `dialog_bg` | `#272b34`
+`panel_header` / `dialog_footer` | `#2f343e`
+`border` / `dialog_border` | `#3f4552`
+`dialog_rule` | `#353b47`
+`text` / `form_ink` / `dialog_label` | `#dee2e8`
+`text_dim` | `#949ba8`
+`form_dim` | `#b4bbc8`
+`form_primary` / `accent` | `#3a88ee`
+`selected_ink` | `#9cc7f5`
+`selected_bg` | `#2a466e`
+`control_fill` | `#1c1f26`
+`control_border` | `#4a5262`
+`icon` | `#d0d6e2`
+`field` | `#1e2229`
+`viewport_top` / `viewport_bottom` | `#2e3440`
+`app_bar_text` (inherited from light) | `#e6eaf2`
+

@@ -114,11 +114,66 @@ fn saved_profile_explorer_family_navigation_does_not_change_document() {
 }
 
 #[test]
+fn saved_profile_library_layout_stays_bounded_across_frames_and_families() {
+    let mut h = crate::scenario::Harness::new();
+    h.step(&json!({"call":"ui.home","params":{"open":false}})).unwrap();
+    h.step(&json!({"start":"frame.profile.library"})).unwrap();
+    h.frames(5);
+    let window = crate::scenario::rect_of("dialog:window").unwrap();
+    let detail = crate::scenario::rect_of("profile_library:detail").unwrap();
+    let resize = crate::scenario::rect_of("profile_library:resize").unwrap();
+    assert!(window.contains_rect(resize), "navigation resize rail remains inside the window");
+    assert!(resize.right() <= detail.left(), "resize rail separates navigation and detail");
+    let family_search = crate::scenario::rect_of(&format!("dialog:row:{}", h.app.tr("profile_library.family_search"))).unwrap();
+    let first_family = crate::scenario::handle_at("profile_library:family:0").unwrap();
+    assert!(window.contains(first_family), "family rows must stay visible inside the window");
+    assert!(first_family.y > family_search.bottom(), "navigation must stack rows vertically, not inherit the horizontal column layout");
+    let search = crate::scenario::rect_of(&format!("dialog:row:{}", h.app.tr("profile_library.custom_search"))).unwrap();
+    assert!(detail.contains_rect(search));
+    assert!(search.width() <= crate::theme::Tokens::get().form_card_width + 1.0);
+    for _ in 0..5 {
+        h.frames(1);
+        assert!((crate::scenario::rect_of("dialog:window").unwrap().width() - window.width()).abs() < 1.0);
+    }
+    h.step(&json!({"click":{"handle":"profile_library:family:3"}})).unwrap();
+    h.frames(5);
+    let detail = crate::scenario::rect_of("profile_library:detail").unwrap();
+    let search = crate::scenario::rect_of(&format!("dialog:row:{}", h.app.tr("profile_library.size_search"))).unwrap();
+    let scroll = crate::scenario::rect_of("profile_library:detail_scroll").unwrap();
+    assert!(scroll.height() > 0.0 && scroll.height() <= detail.height(), "the entire family detail must have a bounded scroll viewport");
+    let add = crate::scenario::rect_of(&format!("dialog:button::{}", h.app.tr("profile_library.add"))).unwrap();
+    assert!(detail.contains_rect(search) && detail.contains_rect(add));
+    assert!(search.right() <= add.left());
+    let width = crate::scenario::rect_of("dialog:window").unwrap().width();
+    for _ in 0..5 {
+        h.frames(1);
+        assert!((crate::scenario::rect_of("dialog:window").unwrap().width() - width).abs() < 1.0);
+    }
+}
+
+#[test]
+fn profile_dimension_editor_escape_keeps_library_open() {
+    let mut h = crate::scenario::Harness::new();
+    h.step(&json!({"call":"ui.home","params":{"open":false}})).unwrap();
+    h.step(&json!({"start":"frame.profile.library"})).unwrap();
+    h.step(&json!({"click":{"handle":"profile_library:family:3"}})).unwrap();
+    let revision = h.app.run("document.revision", json!({})).unwrap();
+    h.step(&json!({"widget":"+ Add"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dialog:window").is_some());
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::ProfileLibrary(_))));
+    assert_eq!(h.app.run("document.revision", json!({})).unwrap(), revision);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+}
+
+#[test]
 fn saved_profile_library_opens_without_mutating_design() {
     let mut app = frame_app();
     let before = app.run("document.revision", json!({})).unwrap();
     app.start("frame.profile.library");
-    assert!(app.dialog.is_some(), "Saved Profiles must open its shared desktop/web editor");
+    assert!(app.dialog.is_some(), "Profile Library must open its shared desktop/web editor");
     assert_eq!(app.run("document.revision", json!({})).unwrap(), before);
 }
 

@@ -2769,7 +2769,7 @@ pub(crate) fn sync_feature_edit_sketch(app: &mut SolveApp) {
 /// Does this dialog dock as a card (at the view's edge or in the left column)? A delete
 /// confirmation is a centred prompt instead.
 pub(crate) fn docks(d: &Dialog) -> bool {
-    !matches!(d.kind, Kind::ConfirmDelete { .. })
+    !matches!(d.kind, Kind::ConfirmDelete { .. } | Kind::ProfileLibrary(_))
 }
 
 /// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
@@ -2801,7 +2801,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
 /// Whether OK and Cancel in the view's corner act on the dialog (#6709): every docked dialog;
 /// a deletion asks in a modal card of its own, which the corner must not answer.
 pub(crate) fn corner_confirms(d: &Dialog) -> bool {
-    !matches!(d.kind, Kind::ConfirmDelete { .. })
+    !matches!(d.kind, Kind::ConfirmDelete { .. } | Kind::ProfileLibrary(_))
 }
 
 /// Show the active dialog (if any), docked flush to an edge of the viewport just below the axis
@@ -2946,6 +2946,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ok = action == crate::ui_kit::Action::Ok;
         cancel = closed || action == crate::ui_kit::Action::Cancel;
         app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
+    } else if let Kind::ProfileLibrary(library) = &mut d.kind {
+        cancel = crate::dialogs_profile_library::show_modal(app, ctx, library);
+        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     } else {
         let response = window.open(&mut keep).show(ctx, |ui| {
             let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
@@ -3066,7 +3069,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::new("sc_canvas_value")));
     // Tables (configurations, a study's keys) take Enter for their cells.
-    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
+    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. } | Kind::ProfileLibrary(_))
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())
         && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
     let report_active = app.issue_report.draft.is_some();

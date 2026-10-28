@@ -722,6 +722,8 @@ pub struct Window<'a> {
     page_padding: egui::Margin,
     page_chrome: bool,
     left_slot: bool,
+    resizable: bool,
+    default_height: Option<f32>,
 }
 
 impl<'a> Window<'a> {
@@ -745,7 +747,27 @@ impl<'a> Window<'a> {
             page_padding: egui::Margin::same(Tokens::get().space_16 as i8),
             page_chrome: false,
             left_slot: false,
+            resizable: false,
+            default_height: None,
         }
+    }
+
+    /// Whether the inner body has standard scrolling padding.
+    pub fn body_padding(mut self, body_padding: bool) -> Self {
+        self.body_padding = body_padding;
+        self
+    }
+
+    /// Whether the window frame can be resized by the user.
+    pub fn resizable(mut self, resizable: bool) -> Self {
+        self.resizable = resizable;
+        self
+    }
+
+    /// Default starting height for the window.
+    pub fn default_height(mut self, height: f32) -> Self {
+        self.default_height = Some(height);
+        self
     }
 
     /// Pin the card at `align` of the screen, `offset` away (it then no longer moves).
@@ -824,6 +846,11 @@ impl<'a> Window<'a> {
         self.surface(ctx, false, |ui| self.content(ui, valid, body, |_| {}))
     }
 
+    /// The same field card on an input-blocking modal surface.
+    pub(crate) fn show_modal(self, ctx: &egui::Context, valid: bool, body: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
+        self.surface(ctx, true, |ui| self.content(ui, valid, body, |_| {}))
+    }
+
     /// A pinned left action slot, independent of the right-aligned footer buttons.
     pub(crate) fn show_with_left(
         mut self,
@@ -842,6 +869,8 @@ impl<'a> Window<'a> {
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut close = false;
             header_impl(ui, (self.icon, self.page_chrome.then_some(t.form_primary)), self.title, None, self.closeable, || close = true);
+            let has_footer = !self.ok.is_empty() || !self.cancel.is_empty() || self.apply.is_some() || self.left_slot;
+            let footer_height = if has_footer { t.form_footer_height } else { 0.0 };
             egui::Frame::NONE.inner_margin(if self.body_padding { t.space_12 } else { 0.0 }).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = t.form_gap_y;
                 if self.body_padding {
@@ -853,6 +882,12 @@ impl<'a> Window<'a> {
                         .min_scrolled_height(0.0)
                         .auto_shrink([false, true])
                         .show(ui, body);
+                } else if self.resizable {
+                    let height = (ui.available_height() - footer_height).max(0.0);
+                    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                    child.set_clip_rect(child.clip_rect().intersect(rect));
+                    body(&mut child);
                 } else {
                     body(ui);
                 }
@@ -940,19 +975,30 @@ impl<'a> Window<'a> {
             scenario::publish_rect("dialog:window", shown.response.rect);
             return shown.inner;
         }
-        let window = super::Container::new(ctx, super::Surface::Window)
+        let mut window = super::Container::new(ctx, super::Surface::Window)
             .window(self.title)
             .id(self.id)
             .title_bar(false)
             .collapsible(false)
-            .resizable(false)
-            .min_width(inner_width)
-            .max_width(inner_width)
+            .resizable(self.resizable)
+            .constrain(true)
             .default_width(inner_width)
             .scroll(false)
             .frame(frame)
             .fade_in(false)
             .fade_out(false);
+        if let Some(h) = self.default_height {
+            window = window.default_height(h);
+        }
+        if self.resizable {
+            let min_w = 640.0f32.min(inner_width);
+            let max_w = (dimension(ctx.content_rect().width()) - frame.total_margin().sum().x).max(min_w);
+            let min_h = 420.0f32.min(dimension(ctx.content_rect().height()));
+            let max_h = (dimension(ctx.content_rect().height()) - frame.total_margin().sum().y).max(min_h);
+            window = window.min_width(min_w).max_width(max_w).min_height(min_h).max_height(max_h);
+        } else {
+            window = window.min_width(inner_width).max_width(inner_width);
+        }
         let window = match (self.anchor, self.placed) {
             (Some((align, offset)), _) => window.anchor(align, offset),
             (None, Some((pivot, pos))) => window.pivot(pivot).default_pos(pos),

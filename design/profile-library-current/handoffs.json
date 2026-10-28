@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "01-estado-actual.html",
+  "handoffs": {
+    "01-estado-actual.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-10-28T15:42:06.086Z",
+      "startedAt": "2026-10-28T15:42:11.228Z",
+      "implementedAt": "2026-10-28T15:45:07.102Z",
+      "note": "Source implementation complete in Rust/egui: adjustable navigation (drag/arrows), responsive dimension guide, filled sections, colored icon actions and padding. Static checks passed. Compilation, tests and visual/runtime verification NOT performed per user restriction; no running preview."
+    }
+  }
+}

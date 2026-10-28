@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "comments": [
+    {
+      "id": "zltzi6c7",
+      "file": "01-estado-actual.html",
+      "selector": "body > main > div > section > div:nth-of-type(2) > table > tbody > tr > td:nth-of-type(9)",
+      "excerpt": "Editar Eliminar",
+      "comment": "Usemos iconos con color",
+      "createdAt": "2026-10-28T15:30:40.417Z",
+      "status": "resolved",
+      "sentAt": "2026-10-28T15:35:54.957Z",
+      "resolvedAt": "2026-10-28T15:36:59.557Z"
+    },
+    {
+      "id": "6dsrt46y",
+      "file": "01-estado-actual.html",
+      "selector": "body > main > div > section > p:nth-of-type(2)",
+      "excerpt": "Dimensiones ilustrativas en mm, no certificadas. A/B: ancho/alto (A: diámetro en redondos); C/D: espesor de pared, alma, ala o pestaña. R: radios de esquina esquemáticos, que pueden ser cero. Las filas son temporales y se descartan al cerrar este diálogo.",
+      "comment": "demos mas formato en lineas con estilo",
+      "createdAt": "2026-10-28T15:31:25.939Z",
+      "status": "resolved",
+      "sentAt": "2026-10-28T15:35:54.957Z",
+      "resolvedAt": "2026-10-28T15:36:59.557Z"
+    },
+    {
+      "id": "15z4xc84",
+      "file": "01-estado-actual.html",
+      "selector": "body > main > div > section > p:nth-of-type(3)",
+      "excerpt": "A · B · C · D · R1 · R2",
+      "comment": "quitemos esto",
+      "createdAt": "2026-10-28T15:32:04.704Z",
+      "status": "resolved",
+      "sentAt": "2026-10-28T15:35:54.957Z",
+      "resolvedAt": "2026-10-28T15:36:59.557Z"
+    },
+    {
+      "id": "28bsioux",
+      "file": "01-estado-actual.html",
+      "selector": "body > main > div > section > svg",
+      "excerpt": "ABCD",
+      "comment": "Algunas familias se muestran con relleno y otras no, unifiquemos que todas tengan relleno",
+      "createdAt": "2026-10-28T15:32:51.630Z",
+      "status": "resolved",
+      "sentAt": "2026-10-28T15:35:54.957Z",
+      "resolvedAt": "2026-10-28T15:36:59.557Z"
+    },
+    {
+      "id": "7wx5rfpd",
+      "file": "01-estado-actual.html",
+      "selector": "body > main > div > nav",
+      "excerpt": "Familias de secciones Buscar familias 9 familias Perfiles guardados y personalizados Secciones personalizadas y perfiles DXF importados Barras planas y cuadradas Barras macizas rectangulares para placas, rieles y separadores Barras redondas Material cilíndrico macizo para ejes y pernos Tubos cuadrad",
+      "comment": "El panel debe poder agrandarse o achicarse en ancho",
+      "createdAt": "2026-10-28T15:34:03.771Z",
+      "status": "resolved",
+      "sentAt": "2026-10-28T15:35:54.957Z",
+      "resolvedAt": "2026-10-28T15:36:59.557Z"
+    },
+    {
+      "id": "52o5pl4f",
+      "file": "01-estado-actual.html",
+      "selector": "body > main",
+      "excerpt": "Librería de Perfiles × Los perfiles viajan con el diseño. Guardá el diseño o exportá una copia. Importar librería… Exportar librería… Familias de secciones Buscar familias 9 familias Perfiles guardados y personalizados Secciones personalizadas y perfiles DXF importados Barras planas y cuadradas Barr",
+      "comment": "Pongamos un padding entre la ventana y el contenido",
+      "createdAt": "2026-10-28T15:35:28.623Z",
+      "status": "resolved",
+      "sentAt": "2026-10-28T15:35:54.957Z",
+      "resolvedAt": "2026-10-28T15:36:59.557Z"
+    },
+    {
+      "id": "a2r5lxyv",
+      "file": "01-estado-actual.html",
+      "selector": "body > main > div > section > aside",
+      "excerpt": "Dimensiones ilustrativas · Unidades en mm · No certificadas A / B Ancho y alto. En secciones redondas, A indica el diámetro. C / D Espesor de pared, alma, ala o pestaña. R Radios de esquina esquemáticos; pueden ser cero. Filas temporales: se descartan al cerrar este diálogo.",
+      "comment": "que sea responsivo, si hay espacio que se ubique a continuacion de croquis y ocupe solo en ancho del texto que contiene.",
+      "createdAt": "2026-10-28T15:39:33.831Z",
+      "status": "resolved",
+      "sentAt": "2026-10-28T15:39:53.060Z",
+      "resolvedAt": "2026-10-28T15:40:19.690Z"
+    }
+  ]
+}

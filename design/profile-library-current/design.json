@@ -1,0 +1,13 @@
+{
+  "title": "Librería de perfiles — estado actual",
+  "brief": "Réplica del estado actual oscuro de la librería de perfiles para iterar mediante comentarios.",
+  "artboards": [
+    {
+      "file": "01-estado-actual.html",
+      "title": "Estado actual: Vigas I / IPN",
+      "tradeoff": "Prioriza la fidelidad a la captura; la densidad, los recortes y el espacio vacío actuales son intencionales.",
+      "width": 1369,
+      "height": 922
+    }
+  ]
+}

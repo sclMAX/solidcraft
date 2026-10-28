@@ -15,6 +15,16 @@ The editor also searches saved profiles and imports/exports portable catalogs.
 Frame Member offers a **Saved section** selector; existing members retain their
 original section when edited.
 
+The family navigation can be resized horizontally. Standard families show filled
+schematic sections and a dimension guide beside the diagram when space permits,
+or below it in narrower panes. The illustrative millimetre dimensions are not
+certified; edits to their temporary rows are discarded when the dialog closes.
+Row actions use edit and delete icons with descriptive tooltips. Adding or editing a
+row opens a centred editor with the selected family's reference schematic. Save
+commits a valid row; Cancel, the close button or Escape discards the draft while
+leaving the library open. Codes must be unique and descriptions nonblank;
+dimensions must be finite and positive, except radii may be zero.
+
 `frame.profile.inspect_dxf` and `frame.profile.import_dxf` accept `text` or `path`,
 exactly one, plus `name`. Inspection is read-only; import optionally takes
 `expected_revision` from inspection and refuses changed source content.
