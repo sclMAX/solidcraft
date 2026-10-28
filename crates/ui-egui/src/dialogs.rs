@@ -2775,7 +2775,9 @@ pub(crate) fn docks(d: &Dialog) -> bool {
 /// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
 pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
-    if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. } | Kind::ProfileLibrary(_)) {
+    if matches!(d.kind, Kind::ProfileLibrary(_)) {
+        t.form_card_width * 2.8
+    } else if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
         t.form_card_width + t.form_label_width + t.space_6
     } else if matches!(&d.kind, Kind::Motion(k) if k.wide()) {
         t.form_card_width * 3.0

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "chosen": "01-explorer.html",
+  "handoffs": {
+    "01-explorer.html": {
+      "status": "in_progress",
+      "queued": false,
+      "sentAt": "2026-10-28T08:37:36.775Z",
+      "startedAt": "2026-10-28T08:37:43.031Z",
+      "implementedAt": null,
+      "feature": "odd/tasks/profile-library-dxf.md",
+      "note": "Implementing Explorer UI layout and interaction in crates/ui-egui"
+    }
+  }
+}

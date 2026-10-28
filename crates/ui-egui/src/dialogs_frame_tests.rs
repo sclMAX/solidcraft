@@ -62,6 +62,7 @@ fn saved_profile_library_uses_shared_pickers_and_explicit_preview() {
     std::fs::write(h.dir.join("tube.dxf"), dxf).unwrap();
     h.step(&json!({"call":"ui.home","params":{"open":false}})).unwrap();
     h.step(&json!({"start":"frame.profile.library"})).unwrap();
+    h.step(&json!({"widget":"Import DXF…"})).unwrap();
     h.step(&json!({"choose_file":"tube.dxf"})).unwrap();
     h.step(&json!({"widget":"Choose DXF…"})).unwrap();
     h.frames(3);
@@ -88,6 +89,28 @@ fn saved_profile_library_uses_shared_pickers_and_explicit_preview() {
     h.step(&json!({"widget":"Import library…"})).unwrap();
     h.frames(3);
     assert_eq!(h.app.run("frame.profile.library", json!({})).unwrap(), library);
+}
+
+#[test]
+fn saved_profile_explorer_defaults_to_custom_and_uses_wide_card() {
+    let mut app = frame_app();
+    app.start("frame.profile.library");
+    let dialog = app.dialog.as_ref().unwrap();
+    let Kind::ProfileLibrary(library) = &dialog.kind else { panic!("profile library expected") };
+    assert_eq!(library.family, 0, "DXF import remains immediately available");
+    assert_eq!(crate::dialogs::card_width(dialog), crate::theme::Tokens::get().form_card_width * 2.8);
+}
+
+#[test]
+fn saved_profile_explorer_family_navigation_does_not_change_document() {
+    let mut h = crate::scenario::Harness::new();
+    h.step(&json!({"call":"ui.home","params":{"open":false}})).unwrap();
+    h.step(&json!({"start":"frame.profile.library"})).unwrap();
+    let revision = h.app.run("document.revision", json!({})).unwrap();
+    h.step(&json!({"click":{"handle":"profile_library:family:3"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.run("document.revision", json!({})).unwrap(), revision);
+    assert!(h.app.run("frame.profile.library", json!({})).unwrap()["entries"].as_array().unwrap().is_empty());
 }
 
 #[test]

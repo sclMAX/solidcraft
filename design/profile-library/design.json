@@ -1,0 +1,28 @@
+{
+  "title": "Profile library \u2014 visual directions",
+  "brief": "Three light SolidCraft visual proposals for per-design saved sections, strict DXF preview and portable JSON catalogs. Fixed local demos only; no production functionality.",
+  "feature": "odd/tasks/profile-library-dxf.md",
+  "artboards": [
+    {
+      "file": "01-explorer.html",
+      "title": "Explorer",
+      "tradeoff": "Fast name scanning and generous section inspection; import occupies a permanent column.",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "02-gallery.html",
+      "title": "Section gallery",
+      "tradeoff": "Shape-first recognition; fewer profiles visible and more space used per section.",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "03-workspace.html",
+      "title": "Docked workspace",
+      "tradeoff": "Keeps modeling context visible; smaller inspection area and longer vertical flow.",
+      "width": 1440,
+      "height": 900
+    }
+  ]
+}
