@@ -252,6 +252,46 @@ fn add_loop(sk: &mut Sketch, l: &Loop2, fixed: bool, cmd: &str) -> Result<()> {
 
 fn member(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.member";
+    let Parsed { mut kind, body_name, default_name, kept } = parse_member(s, p)?;
+    let base = body_name.unwrap_or(default_name);
+    // Each member's name is pinned to its line as the feature is made, so deleting or adding a
+    // line later leaves the other members' names alone.
+    let st = s.model.state();
+    let ids = frame::member_line_ids(&st, &kind).map_err(|e| bad(cmd, e.to_string()))?;
+    let pinned: BTreeMap<String, String> = ids.iter().cloned().zip(frame::member_names(&st, &ids, &kept, &base)).collect();
+    if let FeatureKind::FrameMember { names, .. } = &mut kind {
+        *names = pinned;
+    }
+    // The feature names its own members (`body_name`, `names`), not by position.
+    let mut p = p.clone();
+    if let Some(o) = p.as_object_mut() {
+        o.remove("body_name");
+        o.remove("body_names");
+        o.remove("names");
+    }
+    add_feature(s, &p, kind)
+}
+
+/// The section `frame.member` with these parameters would put on its first line, in world
+/// coordinates, as the member will be made in the active component: for a dialog that shows it
+/// before OK. An error when the command would refuse the parameters or the member cannot be made.
+pub fn member_section_view(s: &Session, p: &Value) -> Result<frame::SectionView> {
+    let Parsed { kind, .. } = parse_member(s, p)?;
+    let st = s.model.state();
+    frame::section_view(&s.doc, &st, &kind, s.active_component).map_err(|e| bad("frame.member", e.to_string()))
+}
+
+/// A `frame.member`'s parameters, checked: the feature (its member names not yet pinned), its
+/// `body_name`, the name its members get without one, and the names asked for by line.
+struct Parsed {
+    kind: FeatureKind,
+    body_name: Option<String>,
+    default_name: String,
+    kept: BTreeMap<String, String>,
+}
+
+fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
+    let cmd = "frame.member";
     let path_sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
     let lines = match p.get("lines") {
         None | Some(Value::Null) => Vec::new(),
@@ -335,8 +375,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
             .collect::<Result<_>>()?,
         Some(_) => return Err(bad(cmd, format!("`names` must map up to {} line ids to names", frame::MAX_MEMBERS))),
     };
-    let base = body_name.clone().unwrap_or(default_name);
-    let mut kind = FeatureKind::FrameMember {
+    let kind = FeatureKind::FrameMember {
         path_sketch: SketchId(path_sketch),
         lines,
         profile,
@@ -344,23 +383,8 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         locate,
         angle,
         mirror,
-        body_name,
+        body_name: body_name.clone(),
         names: BTreeMap::new(),
     };
-    // Each member's name is pinned to its line as the feature is made, so deleting or adding a
-    // line later leaves the other members' names alone.
-    let st = s.model.state();
-    let ids = frame::member_line_ids(&st, &kind).map_err(|e| bad(cmd, e.to_string()))?;
-    let pinned: BTreeMap<String, String> = ids.iter().cloned().zip(frame::member_names(&st, &ids, &kept, &base)).collect();
-    if let FeatureKind::FrameMember { names, .. } = &mut kind {
-        *names = pinned;
-    }
-    // The feature names its own members (`body_name`, `names`), not by position.
-    let mut p = p.clone();
-    if let Some(o) = p.as_object_mut() {
-        o.remove("body_name");
-        o.remove("body_names");
-        o.remove("names");
-    }
-    add_feature(s, &p, kind)
+    Ok(Parsed { kind, body_name, default_name, kept })
 }

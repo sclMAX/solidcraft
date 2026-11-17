@@ -348,7 +348,7 @@ impl crate::walk::Walk for ProfileSpec {
     }
 }
 
-pub use crate::eval::frame_member::{member_line_ids, member_names, member_turns};
+pub use crate::eval::frame_member::{SectionView, member_line_ids, member_names, member_turns, section_view};
 
 /// Where a frame member's cross-section comes from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -392,6 +392,23 @@ pub enum Anchor {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+impl Anchor {
+    /// Every anchor, in the order the Frame Member dialog lists them.
+    pub const ALL: &[Anchor] = &[
+        Anchor::Origin,
+        Anchor::Center,
+        Anchor::Centroid,
+        Anchor::TopLeft,
+        Anchor::Top,
+        Anchor::TopRight,
+        Anchor::Left,
+        Anchor::Right,
+        Anchor::BottomLeft,
+        Anchor::Bottom,
+        Anchor::BottomRight,
+    ];
 }
 
 /// A profile's section properties (mm², mm, mm⁴). Second moments are about axes through the

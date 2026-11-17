@@ -28,7 +28,7 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     let FeatureKind::FrameMember { body_name, names, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, description, at, turn, turns, centre } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, description, at, turn, turns, centre, .. } = layout(doc, vals, &f.kind, f.component, Some(FeatureId(f.id)), st)?;
     let mut made = Vec::with_capacity(segments.len());
     for (id, a, b) in &segments {
         let plane = member_plane(*a, *b, turn, at, centre, turns.get(id).copied())
@@ -69,16 +69,20 @@ struct Layout {
     turn: f64,
     turns: BTreeMap<String, f64>,
     centre: Vec2,
+    /// The profile's own origin, which `locate` is measured from.
+    origin: Vec2,
 }
 
-fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
+/// The layout of a member feature of `kind` in `component`; `id` is the feature once made, whose
+/// Rotate steps turn its lines (none for a member a dialog shows before it is made).
+fn layout(doc: &Document, vals: &BTreeMap<String, Value>, kind: &FeatureKind, component: u64, id: Option<FeatureId>, st: &ModelState) -> Result<Layout> {
+    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
     // The frame sketch in this feature's component frame: its plane, and its 3D lines.
     let mapped =
-        if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
+        if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, component)?) } else { path_in_frame(doc, ps, component)? };
     let segments = member_lines(mapped.as_ref(), lines)?;
     let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
     if *mirror {
@@ -103,10 +107,15 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
     };
-    let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
+    // A Rotate step's own turn of a line (#15071); none for a member not made yet.
+    let turns = match id {
+        Some(id) => member_turns(doc, vals, id).into_iter().map(|(line, (_, a))| (line, a)).collect(),
+        None => BTreeMap::new(),
+    };
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
-    Ok(Layout { segments, regions, description, at, turn, turns, centre })
+    Ok(Layout { segments, regions, description, at, turn, turns, centre, origin })
 }
+
 
 /// The plane a member's profile is laid in at `a`, square to the line on to `b`: profile point
 /// `at` on the line, the profile turned `turn` about it. A Rotate step's turn `own` turns it on
@@ -120,6 +129,69 @@ fn member_plane(a: Vec3, b: Vec3, turn: f64, at: Vec2, centre: Vec2, own: Option
     Plane::new(pivot - x * centre.x - y * centre.y, x, y)
 }
 
+
+/// A member's section as a dialog shows it before the member is made: the section of the member
+/// on the feature's first line, in world coordinates, laid out by the same code that makes the
+/// body, so what the dialog shows is where the member goes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SectionView {
+    /// The first line's start, where the section sits, and its end.
+    pub start: Vec3,
+    pub end: Vec3,
+    /// The section's axes (unit, x × y along the line).
+    pub x: Vec3,
+    pub y: Vec3,
+    /// The section's regions in its own coordinates, mirrored when the member is.
+    pub regions: Vec<Region2>,
+    /// The section point that sits on the line.
+    pub at: Vec2,
+    /// The profile's own origin, which `locate` is measured from.
+    pub origin: Vec2,
+    pub mirror: bool,
+}
+
+impl SectionView {
+    /// The world point of section point `p`.
+    pub fn world(&self, p: Vec2) -> Vec3 {
+        self.start + self.x * (p.x - self.at.x) + self.y * (p.y - self.at.y)
+    }
+
+    /// The section point at world point `q` (projected onto the section's plane).
+    pub fn section_point(&self, q: Vec3) -> Vec2 {
+        let d = q - self.start;
+        Vec2::new(self.at.x + d.dot(self.x), self.at.y + d.dot(self.y))
+    }
+
+    /// The `locate` that puts section point `p` on the line: measured from the profile's own
+    /// origin, before the mirror, as the member reads it.
+    pub fn locate_of(&self, p: Vec2) -> [f64; 2] {
+        let q = if self.mirror { Vec2::new(-p.x, p.y) } else { p };
+        [q.x - self.origin.x, q.y - self.origin.y]
+    }
+
+    /// Every anchor's section point, in [`frame::Anchor::ALL`] order.
+    pub fn anchors(&self) -> Vec<(frame::Anchor, Vec2)> {
+        frame::Anchor::ALL.iter().map(|a| (*a, frame::anchor_point(&self.regions, *a))).collect()
+    }
+}
+
+/// The section a member feature of `kind`, made in `component`, puts on its first line (see
+/// [`SectionView`]); an error when the feature could not be made as it stands.
+pub fn section_view(doc: &Document, st: &ModelState, kind: &FeatureKind, component: u64) -> Result<SectionView> {
+    let FeatureKind::FrameMember { mirror, .. } = kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let (vals, _) = doc.param_values();
+    let Layout { segments, regions, at, turn, origin, .. } = layout(doc, &vals, kind, component, None, st)?;
+    let (_, a, b) = segments.first().ok_or_else(|| DocError::Invalid("the member feature has no lines".into()))?;
+    // The axes as the body is made, in the component's frame, then the whole carried to world.
+    let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid("the first line has no length".into()))?;
+    let m = doc.component_transform(component);
+    let unit = |v: Vec3| crate::apply_vector(&m, v).normalized().ok_or_else(|| DocError::Invalid("the component frame is degenerate".into()));
+    let (x, y) = (unit(x)?, unit(y)?);
+    Ok(SectionView { start: crate::apply_point(&m, *a), end: crate::apply_point(&m, *b), x, y, regions, at, origin, mirror: *mirror })
+}
+
 /// The member of feature `f` on line `line`, as its body was made: the plane square to the line
 /// at its start (x × y along the line), its length, and its profile in that plane.
 pub(crate) fn member_section(
@@ -129,7 +201,7 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2)> {
-    let Layout { segments, regions, at, turn, turns, centre, .. } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, at, turn, turns, centre, .. } = layout(doc, vals, &f.kind, f.component, Some(FeatureId(f.id)), st)?;
     let (_, a, b) = segments.iter().find(|(id, _, _)| id == line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
     let plane = member_plane(*a, *b, turn, at, centre, turns.get(line).copied())
         .ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
@@ -140,7 +212,7 @@ pub(crate) fn member_section(
 /// The point member `line` of `f` turns about, halfway along it: the centre of the profile's
 /// bounding box, which a Rotate step's turn leaves where it is ([`member_plane`]).
 pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<Vec3> {
-    let Layout { segments, at, turn, centre, .. } = layout(doc, vals, f, st)?;
+    let Layout { segments, at, turn, centre, .. } = layout(doc, vals, &f.kind, f.component, Some(FeatureId(f.id)), st)?;
     let (_, a, b) = segments.iter().find(|(id, _, _)| id == line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
     let plane = member_plane(*a, *b, turn, at, centre, None).ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
     Ok(plane.origin + plane.x * centre.x + plane.y * centre.y + (*b - *a) * 0.5)
