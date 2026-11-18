@@ -98,15 +98,10 @@ fn layout(
     let at = match locate {
         Some([x, y]) => {
             // A design file is hostile input: the command checks the point, a file may not.
-            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
+            if !(frame::within_profile_size(*x) && frame::within_profile_size(*y)) {
                 return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
             }
-            // `locate` is the profile point that sits on the line, measured from the profile's
-            // own origin (`Profile::origin`). The built-in region is centred on its bounding
-            // box, so that origin moves when the section's size changes, and the located point
-            // moves with it: the member stays attached at the same point of its section.
-            let p = origin + Vec2::new(*x, *y);
-            if *mirror { Vec2::new(-p.x, p.y) } else { p }
+            located_point(origin, *mirror, [*x, *y])
         }
         None => frame::anchor_point(&regions, *anchor),
     };
@@ -133,6 +128,17 @@ fn member_plane(a: Vec3, b: Vec3, turn: f64, at: Vec2, centre: Vec2, own: Option
     let pivot = origin + x * centre.x + y * centre.y;
     let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU))?;
     Plane::new(pivot - x * centre.x - y * centre.y, x, y)
+}
+
+/// The section point a member's `locate` puts on its line, in the section's coordinates as drawn
+/// (mirrored when the member is). `locate` is measured from the profile's own origin
+/// (`Profile::origin`), before the mirror. The built-in region is centred on its bounding box, so
+/// that origin moves when the section's size changes, and the located point moves with it: the
+/// member stays attached at the same point of its section. [`SectionView::locate_of`] is the
+/// inverse.
+pub fn located_point(origin: Vec2, mirror: bool, locate: [f64; 2]) -> Vec2 {
+    let p = origin + Vec2::new(locate[0], locate[1]);
+    if mirror { Vec2::new(-p.x, p.y) } else { p }
 }
 
 /// A member's section as a dialog shows it before the member is made: the section of the member
@@ -168,10 +174,15 @@ impl SectionView {
     }
 
     /// The `locate` that puts section point `p` on the line: measured from the profile's own
-    /// origin, before the mirror, as the member reads it.
+    /// origin, before the mirror, as the member reads it ([`located_point`] is the inverse).
     pub fn locate_of(&self, p: Vec2) -> [f64; 2] {
         let q = if self.mirror { Vec2::new(-p.x, p.y) } else { p };
         [q.x - self.origin.x, q.y - self.origin.y]
+    }
+
+    /// The section point that `locate` puts on the line: the inverse of [`Self::locate_of`].
+    pub fn locate_point(&self, locate: [f64; 2]) -> Vec2 {
+        located_point(self.origin, self.mirror, locate)
     }
 
     /// Every anchor's section point, in [`frame::Anchor::ALL`] order.
