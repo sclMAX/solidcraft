@@ -176,8 +176,9 @@ impl SectionView {
 }
 
 /// The section a member feature of `kind`, made in `component`, puts on its first line (see
-/// [`SectionView`]); an error when the feature could not be made as it stands.
-pub fn section_view(doc: &Document, st: &ModelState, kind: &FeatureKind, component: u64) -> Result<SectionView> {
+/// [`SectionView`]), carried to world by `placed` (the component's frame as shown: the active
+/// occurrence's, with its pending move); an error when the feature could not be made as it stands.
+pub fn section_view(doc: &Document, st: &ModelState, kind: &FeatureKind, component: u64, placed: &crate::Mat) -> Result<SectionView> {
     let FeatureKind::FrameMember { mirror, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -186,10 +187,10 @@ pub fn section_view(doc: &Document, st: &ModelState, kind: &FeatureKind, compone
     let (_, a, b) = segments.first().ok_or_else(|| DocError::Invalid("the member feature has no lines".into()))?;
     // The axes as the body is made, in the component's frame, then the whole carried to world.
     let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid("the first line has no length".into()))?;
-    let m = doc.component_transform(component);
-    let unit = |v: Vec3| crate::apply_vector(&m, v).normalized().ok_or_else(|| DocError::Invalid("the component frame is degenerate".into()));
+    let m = placed;
+    let unit = |v: Vec3| crate::apply_vector(m, v).normalized().ok_or_else(|| DocError::Invalid("the component frame is degenerate".into()));
     let (x, y) = (unit(x)?, unit(y)?);
-    Ok(SectionView { start: crate::apply_point(&m, *a), end: crate::apply_point(&m, *b), x, y, regions, at, origin, mirror: *mirror })
+    Ok(SectionView { start: crate::apply_point(m, *a), end: crate::apply_point(m, *b), x, y, regions, at, origin, mirror: *mirror })
 }
 
 /// The member of feature `f` on line `line`, as its body was made: the plane square to the line

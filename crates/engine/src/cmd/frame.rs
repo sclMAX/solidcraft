@@ -276,9 +276,11 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
 /// coordinates, as the member will be made in the active component: for a dialog that shows it
 /// before OK. An error when the command would refuse the parameters or the member cannot be made.
 pub fn member_section_view(s: &Session, p: &Value) -> Result<frame::SectionView> {
-    let Parsed { kind, .. } = parse_member(s, p)?;
+    let Parsed { mut kind, .. } = parse_member(s, p)?;
+    // Read as the member is made: in the design's units, shown where the active occurrence is.
+    super::features::in_design_units(s, &mut kind);
     let st = s.model.state();
-    frame::section_view(&s.doc, &st, &kind, s.active_component).map_err(|e| bad("frame.member", e.to_string()))
+    frame::section_view(&s.doc, &st, &kind, s.active_component, &s.active_component_frame()).map_err(|e| bad("frame.member", e.to_string()))
 }
 
 /// A `frame.member`'s parameters, checked: the feature (its member names not yet pinned), its
