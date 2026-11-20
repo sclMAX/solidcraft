@@ -75,7 +75,14 @@ struct Layout {
 
 /// The layout of a member feature of `kind` in `component`; `id` is the feature once made, whose
 /// Rotate steps turn its lines (none for a member a dialog shows before it is made).
-fn layout(doc: &Document, vals: &BTreeMap<String, Value>, kind: &FeatureKind, component: u64, id: Option<FeatureId>, st: &ModelState) -> Result<Layout> {
+fn layout(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    kind: &FeatureKind,
+    component: u64,
+    id: Option<FeatureId>,
+    st: &ModelState,
+) -> Result<Layout> {
     let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -116,7 +123,6 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, kind: &FeatureKind, co
     Ok(Layout { segments, regions, description, at, turn, turns, centre, origin })
 }
 
-
 /// The plane a member's profile is laid in at `a`, square to the line on to `b`: profile point
 /// `at` on the line, the profile turned `turn` about it. A Rotate step's turn `own` turns it on
 /// about the profile point `centre`, which stays where it was.
@@ -128,7 +134,6 @@ fn member_plane(a: Vec3, b: Vec3, turn: f64, at: Vec2, centre: Vec2, own: Option
     let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU))?;
     Plane::new(pivot - x * centre.x - y * centre.y, x, y)
 }
-
 
 /// A member's section as a dialog shows it before the member is made: the section of the member
 /// on the feature's first line, in world coordinates, laid out by the same code that makes the
